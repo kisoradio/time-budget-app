@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TimeBudgetDB, ensureSeeded } from './db'
-import { endAsNap, goToBed, startCycle, startMeasuring, stopMeasuring, updateWakeAt } from './actions'
+import { adjustCategoryTotal, endAsNap, goToBed, startCycle, startMeasuring, stopMeasuring, updateWakeAt } from './actions'
 import { exportBackup, importBackupOverwrite, parseBackup, clearAllData } from './backup'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 import { deriveCycleRanges, splitEntries, summarizeCycle } from '../domain/cycles'
@@ -181,5 +181,57 @@ describe('バックアップ（§14.3, §17-15）', () => {
     expect(() => parseBackup('{')).toThrow()
     expect(() => parseBackup('{"app":"other"}')).toThrow()
     expect(() => parseBackup('{"app":"time-budget-app","schemaVersion":99}')).toThrow()
+  })
+})
+
+describe('合計時間の調整', () => {
+  it('増やすと直近の記録の開始が早まり、減らすと直近から縮む', async () => {
+    const work = await cat('仕事')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await startMeasuring(work, { at: iso('2026-10-15 09:00') }, db)
+    const e = (await db.entries.toArray())[0]
+    await stopMeasuring(e, work.name, iso('2026-10-15 10:00'), db)
+    const now = T('2026-10-15 12:00')
+    // 1:00 → 1:30
+    await adjustCategoryTotal(work, r.cycle.wakeAt, 90 * 60_000, now, db)
+    let w = (await db.entries.get(e.id))!
+    expect(w.startAt).toBe(iso('2026-10-15 08:30'))
+    expect(w.endAt).toBe(iso('2026-10-15 10:00'))
+    // 1:30 → 0:20
+    const r2 = await adjustCategoryTotal(work, r.cycle.wakeAt, 20 * 60_000, now, db)
+    w = (await db.entries.get(e.id))!
+    expect(w.endAt).toBe(iso('2026-10-15 08:50'))
+    await r2.undo()
+    w = (await db.entries.get(e.id))!
+    expect(w.endAt).toBe(iso('2026-10-15 10:00'))
+  })
+
+  it('計測中の記録は開始時刻を動かして合わせる', async () => {
+    const work = await cat('仕事')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await startMeasuring(work, { at: iso('2026-10-15 09:00') }, db)
+    const now = T('2026-10-15 09:30')
+    await adjustCategoryTotal(work, r.cycle.wakeAt, 60 * 60_000, now, db)
+    let w = (await db.entries.toArray())[0]
+    expect(w.startAt).toBe(iso('2026-10-15 08:30'))
+    expect(w.endAt).toBeNull()
+    await adjustCategoryTotal(work, r.cycle.wakeAt, 10 * 60_000, now, db)
+    w = (await db.entries.toArray())[0]
+    expect(w.startAt).toBe(iso('2026-10-15 09:20'))
+  })
+
+  it('記録がなければ今で終わる記録を作り、0にすれば記録が消える', async () => {
+    const work = await cat('仕事')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const now = T('2026-10-15 12:00')
+    await adjustCategoryTotal(work, r.cycle.wakeAt, 45 * 60_000, now, db)
+    const entries = await db.entries.toArray()
+    expect(entries).toHaveLength(1)
+    expect(entries[0].startAt).toBe(iso('2026-10-15 11:15'))
+    expect(entries[0].endAt).toBe(iso('2026-10-15 12:00'))
+    const r2 = await adjustCategoryTotal(work, r.cycle.wakeAt, 0, now, db)
+    expect(await db.entries.count()).toBe(0)
+    await r2.undo()
+    expect(await db.entries.count()).toBe(1)
   })
 })
