@@ -41,8 +41,8 @@ export function ActionCard({
             {category.protect && <span className="card-protect" title="優先して守る">★</span>}
           </span>
           <span className="card-numbers">
-            {/* 計測中は秒まで出して、動いていることが見えるようにする */}
-            <span className={`card-measured ${running ? 'ticking' : ''}`}>{running ? formatMsWithSeconds(measuredMs) : formatMinutes(measuredMin)}</span>
+            {/* 秒まで出して、計測中は動いていることが見えるようにする（停止中も表記をそろえる） */}
+            <span className={`card-measured ${running ? 'ticking' : ''}`}>{formatMsWithSeconds(measuredMs)}</span>
             <span className="card-budget"> / {budgetMin > 0 ? formatMinutes(budgetMin) : '—'}</span>
           </span>
         </div>
