@@ -141,7 +141,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .minutes-head { display: flex; justify-content: space-between; align-items: baseline; }
 .minutes-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-left: auto; background: none; border: 0; padding: 4px 8px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; }
 .minutes-value:active { background: var(--bar-empty); }
-.minutes-value-hint { font-size: 13px; color: var(--muted); font-weight: 400; }
+.minutes-value-hint { font-size: 22px; color: var(--muted); font-weight: 400; line-height: 1; }
 .minutes-edit { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .minutes-edit input { width: 56px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; text-align: right; min-height: 40px; font-size: 16px; }
 .minutes-slider { display: flex; align-items: center; gap: 6px; }

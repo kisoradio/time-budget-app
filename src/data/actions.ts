@@ -272,3 +272,98 @@ export async function saveSettings(patch: Partial<Settings>, database: TimeBudge
 export function isoFromMs(ms: number): string {
   return toIso(ms)
 }
+
+/**
+ * そのサイクルでのカテゴリー別合計を、指定した長さに合わせる（カードの「合計時間を調整」）。
+ * - 増やすとき：直近の記録の開始時刻を早める（起床時刻より前にはしない）。
+ *   止まっている記録で足りなければ終了時刻を今まで遅らせる。記録がなければ今で終わる記録を作る。
+ * - 減らすとき：直近の記録から縮める。0 になった記録は削除し、さらに前の記録を縮める。
+ */
+export async function adjustCategoryTotal(
+  category: Category,
+  cycleWakeAt: string,
+  targetMs: number,
+  nowMs: number = Date.now(),
+  database: TimeBudgetDB = db,
+): Promise<ActionResult> {
+  const wakeMs = toMs(cycleWakeAt)
+  const target = Math.max(0, Math.round(targetMs / 60_000) * 60_000)
+  return database.transaction('rw', database.entries, database.settings, async () => {
+    const all = (await database.entries.where('categoryId').equals(category.id).toArray()).filter((e) => {
+      const end = e.endAt === null ? nowMs : toMs(e.endAt)
+      return end > wakeMs && toMs(e.startAt) < nowMs
+    })
+    // サイクル内の長さだけを数える（境界をまたぐ記録は起床以降の分）
+    const inCycle = (e: TimeEntry) => Math.max(0, (e.endAt === null ? nowMs : toMs(e.endAt)) - Math.max(wakeMs, toMs(e.startAt)))
+    const current = all.reduce((sum, e) => sum + inCycle(e), 0)
+    let delta = target - current
+    const originals: TimeEntry[] = []
+    const deleted: TimeEntry[] = []
+    const created: TimeEntry[] = []
+    const sorted = [...all].sort((a, b) => toMs(b.startAt) - toMs(a.startAt))
+
+    if (delta > 0) {
+      const latest = sorted[0]
+      if (latest) {
+        originals.push({ ...latest })
+        let startMs = toMs(latest.startAt)
+        const canEarlier = Math.max(0, startMs - wakeMs)
+        const earlier = Math.min(delta, canEarlier)
+        startMs -= earlier
+        delta -= earlier
+        let endAt = latest.endAt
+        if (delta > 0 && endAt !== null) {
+          const endMs = toMs(endAt)
+          const later = Math.min(delta, Math.max(0, nowMs - endMs))
+          endAt = toIso(endMs + later)
+          delta -= later
+        }
+        await database.entries.put({ ...latest, startAt: toIso(startMs), endAt, updatedAt: nowIso() })
+      }
+      if (delta > 0) {
+        const startMs = Math.max(wakeMs, nowMs - delta)
+        if (nowMs > startMs) {
+          const e: TimeEntry = { id: newId(), categoryId: category.id, startAt: toIso(startMs), endAt: toIso(nowMs), kind: category.mode === 'sleep' ? 'sleep' : 'manual', updatedAt: nowIso() }
+          await database.entries.put(e)
+          created.push(e)
+        }
+      }
+    } else if (delta < 0) {
+      let remain = -delta
+      for (const e of sorted) {
+        if (remain <= 0) break
+        const len = inCycle(e)
+        if (len <= remain) {
+          // 丸ごと消す（起床前にはみ出した分があれば、起床時刻で切る）
+          if (toMs(e.startAt) < wakeMs) {
+            originals.push({ ...e })
+            await database.entries.put({ ...e, endAt: cycleWakeAt, updatedAt: nowIso() })
+          } else {
+            deleted.push({ ...e })
+            await database.entries.delete(e.id)
+          }
+          remain -= len
+        } else {
+          originals.push({ ...e })
+          if (e.endAt === null) {
+            await database.entries.put({ ...e, startAt: toIso(toMs(e.startAt) + remain), updatedAt: nowIso() })
+          } else {
+            await database.entries.put({ ...e, endAt: toIso(toMs(e.endAt) - remain), updatedAt: nowIso() })
+          }
+          remain = 0
+        }
+      }
+    }
+    await touchLastAction(database, nowIso())
+    return {
+      message: `${category.name}の合計を調整しました`,
+      undo: async () => {
+        await database.transaction('rw', database.entries, async () => {
+          for (const e of created) await database.entries.delete(e.id)
+          for (const e of deleted) await database.entries.put(e)
+          await restoreEntries(database, originals)
+        })
+      },
+    }
+  })
+}

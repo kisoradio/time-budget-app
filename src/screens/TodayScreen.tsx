@@ -10,9 +10,9 @@ import { Sheet } from '../ui/Modal'
 import { SwipeRow } from '../ui/SwipeRow'
 import { DateTimeField, MinutesField } from '../ui/DateTimeField'
 import { useToast } from '../ui/Toast'
-import { archiveCategory, endAsNap, goToBed, newManualEntry, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
+import { adjustCategoryTotal, archiveCategory, endAsNap, goToBed, newManualEntry, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
 import { cycleLabels, deriveCycleRanges, runningEntryOf, splitEntries, summarizeCycle } from '../domain/cycles'
-import { formatClock, formatDateTime, formatMs, nowIso, toMs } from '../domain/time'
+import { formatClock, formatDateTime, formatMinutes, formatMs, nowIso, toMs } from '../domain/time'
 import type { Category, Cycle, TimeEntry } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 
@@ -110,6 +110,7 @@ function SleepScreen({ data, entry, nowMs, onOpenSettings }: { data: AppData; en
 type Menu =
   | { kind: 'card'; category: Category }
   | { kind: 'entries'; category: Category }
+  | { kind: 'adjust'; category: Category }
   | { kind: 'budget'; category: Category }
   | { kind: 'category'; category: Category }
   | { kind: 'cycle' }
@@ -191,8 +192,8 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
       {menu?.kind === 'card' && (
         <Sheet title={menu.category.name} onClose={() => setMenu(null)}>
           <div className="stack">
-            <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'entries', category: menu.category })}>
-              時間修正
+            <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'adjust', category: menu.category })}>
+              合計時間を調整
             </button>
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'budget', category: menu.category })}>
               予算変更
@@ -202,6 +203,19 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
             </button>
           </div>
         </Sheet>
+      )}
+      {menu?.kind === 'adjust' && (
+        <AdjustTotalSheet
+          category={menu.category}
+          currentMs={msOf(menu.category.id)}
+          onSave={async (targetMs) => {
+            const r = await adjustCategoryTotal(menu.category, cycle.wakeAt, targetMs, nowMs)
+            toast.show(r)
+            setMenu(null)
+          }}
+          onDetail={() => setMenu({ kind: 'entries', category: menu.category })}
+          onClose={() => setMenu(null)}
+        />
       )}
       {menu?.kind === 'entries' && (
         <EntryList
@@ -305,6 +319,33 @@ export function WakeSheet({ cycle, nowMs, onSave, onClose }: { cycle: Cycle; now
           やめる
         </button>
         <button type="button" className="btn btn-primary" onClick={() => onSave(wakeAt)} disabled={invalid}>
+          保存
+        </button>
+      </div>
+    </Sheet>
+  )
+}
+
+function AdjustTotalSheet({ category, currentMs, onSave, onDetail, onClose }: { category: Category; currentMs: number; onSave: (ms: number) => void; onDetail: () => void; onClose: () => void }) {
+  const currentMin = Math.round(currentMs / 60_000)
+  const [value, setValue] = useState(currentMin)
+  return (
+    <Sheet title={`${category.name}の今日の合計`} onClose={onClose}>
+      <p className="muted small">押し忘れなどで実際と違うときに、合計を合わせます。増やすと直近の記録が伸び、減らすと直近の記録から縮みます。</p>
+      <MinutesField value={value} onChange={setValue} step={10} />
+      <p className="muted small">
+        今の合計 {formatMinutes(currentMin)}
+        {value !== currentMin && ` → ${formatMinutes(value)}（${value > currentMin ? '+' : '−'}${formatMinutes(Math.abs(value - currentMin))}）`}
+      </p>
+      <div className="sheet-actions">
+        <button type="button" className="btn btn-quiet" onClick={onDetail}>
+          記録ごとに修正
+        </button>
+        <span className="spacer" />
+        <button type="button" className="btn" onClick={onClose}>
+          やめる
+        </button>
+        <button type="button" className="btn btn-primary" onClick={() => onSave(value * 60_000)} disabled={value === currentMin}>
           保存
         </button>
       </div>
