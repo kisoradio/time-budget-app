@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatMinutes, formatMs, fromDatetimeLocalValue, toDatetimeLocalValue, localDateKey } from './time'
+import { formatMinutes, formatMs, formatMsWithSeconds, fromDatetimeLocalValue, toDatetimeLocalValue, localDateKey } from './time'
 
 describe('時刻の表記', () => {
   it('H:MM 形式で表示する（§15）', () => {
@@ -9,6 +9,11 @@ describe('時刻の表記', () => {
     expect(formatMinutes(-30)).toBe('-0:30')
     expect(formatMs(90 * 60_000 + 29_000)).toBe('1:30')
     expect(formatMs(3 * 60 * 60_000 - 500)).toBe('3:00')
+  })
+
+  it('計測中は秒まで表示する', () => {
+    expect(formatMsWithSeconds(0)).toBe('0:00:00')
+    expect(formatMsWithSeconds(80 * 60_000 + 35_500)).toBe('1:20:35')
   })
 
   it('datetime-local の値と UTC を往復できる', () => {

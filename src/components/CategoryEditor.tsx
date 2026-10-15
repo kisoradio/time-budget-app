@@ -28,7 +28,7 @@ export function CategoryEditor({ category, isNew, onClose }: { category: Categor
   }
 
   return (
-    <Sheet title={isNew ? 'カテゴリーを追加' : 'カテゴリー設定'} onClose={onClose}>
+    <Sheet title={isNew ? 'タイマーを追加' : 'タイマーの設定'} onClose={onClose}>
       <label className="field">
         <span className="field-label">名前</span>
         <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} maxLength={20} />
@@ -64,7 +64,7 @@ export function CategoryEditor({ category, isNew, onClose }: { category: Categor
           </p>
         </div>
       )}
-      {isSleep && <p className="muted small">睡眠は組み込みのカテゴリーです。予算に対する不足・超過だけを表示します。</p>}
+      {isSleep && <p className="muted small">睡眠は組み込みのタイマーです。予算に対する不足・超過だけを表示します。</p>}
       <label className="field field-inline">
         <input type="checkbox" checked={draft.protect} onChange={(e) => setDraft({ ...draft, protect: e.target.checked })} />
         <span>優先して守る</span>

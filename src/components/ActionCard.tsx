@@ -1,6 +1,6 @@
 import { ProgressBar } from './ProgressBar'
 import { usePressable } from '../ui/usePressable'
-import { formatMinutes } from '../domain/time'
+import { formatMinutes, formatMsWithSeconds, msToMinutes } from '../domain/time'
 import type { Category } from '../domain/types'
 
 /**
@@ -10,7 +10,7 @@ import type { Category } from '../domain/types'
  */
 export function ActionCard({
   category,
-  measuredMin,
+  measuredMs,
   budgetMin,
   running,
   onTap,
@@ -18,7 +18,8 @@ export function ActionCard({
   onMenu,
 }: {
   category: Category
-  measuredMin: number
+  /** このサイクルのカテゴリー別合計（ミリ秒） */
+  measuredMs: number
   budgetMin: number
   running: boolean
   onTap: () => void
@@ -26,6 +27,7 @@ export function ActionCard({
   onMenu: () => void
 }) {
   const { pressing, longPressing, handlers } = usePressable({ onTap, onLongPress })
+  const measuredMin = msToMinutes(measuredMs)
   const status = describe(category, measuredMin, budgetMin)
   const className = ['card', running ? 'card-running' : '', pressing ? 'card-pressing' : '', longPressing ? 'card-longpress' : ''].filter(Boolean).join(' ')
 
@@ -39,13 +41,22 @@ export function ActionCard({
             {category.protect && <span className="card-protect" title="優先して守る">★</span>}
           </span>
           <span className="card-numbers">
-            <span className="card-measured">{formatMinutes(measuredMin)}</span>
+            {/* 計測中は秒まで出して、動いていることが見えるようにする */}
+            <span className={`card-measured ${running ? 'ticking' : ''}`}>{running ? formatMsWithSeconds(measuredMs) : formatMinutes(measuredMin)}</span>
             <span className="card-budget"> / {budgetMin > 0 ? formatMinutes(budgetMin) : '—'}</span>
           </span>
         </div>
         <div className="card-row card-row-sub">
           <span className={`card-status ${status.tone}`}>{status.text}</span>
-          <span className={`card-state ${running ? 'on' : ''}`}>{running ? '● 計測中' : '停止中'}</span>
+          <span className={`card-state ${running ? 'on' : ''}`}>
+            {running ? (
+              <>
+                <span className="pulse-dot" aria-hidden="true">●</span> 計測中<span className="dots" aria-hidden="true" />
+              </>
+            ) : (
+              '停止中'
+            )}
+          </span>
         </div>
         <ProgressBar mode={category.mode} measuredMin={measuredMin} budgetMin={budgetMin} color={category.color} />
         {longPressing && <div className="card-hint">同時計測で開始</div>}

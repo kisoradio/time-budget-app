@@ -3,14 +3,15 @@ import type { AppData } from '../hooks/useAppData'
 import { TimelineBar } from '../components/TimelineBar'
 import { ActionCard } from '../components/ActionCard'
 import { EntryEditor } from '../components/EntryEditor'
-import { CategoryEditor } from '../components/CategoryEditor'
+import { CategoryEditor, CATEGORY_COLORS } from '../components/CategoryEditor'
+import { newId } from '../data/db'
 import { BedtimeDialog } from '../components/BedtimeDialog'
 import { Sheet } from '../ui/Modal'
 import { DateTimeField, MinutesField } from '../ui/DateTimeField'
 import { useToast } from '../ui/Toast'
 import { endAsNap, goToBed, newManualEntry, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
 import { cycleLabels, deriveCycleRanges, runningEntryOf, splitEntries, summarizeCycle } from '../domain/cycles'
-import { formatClock, formatDateTime, formatMs, msToMinutes, nowIso, toMs } from '../domain/time'
+import { formatClock, formatDateTime, formatMs, nowIso, toMs } from '../domain/time'
 import type { Category, Cycle, TimeEntry } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 
@@ -115,6 +116,7 @@ type Menu =
   | { kind: 'bedtime' }
   | { kind: 'addEntry'; category: Category }
   | { kind: 'editEntry'; entry: TimeEntry }
+  | { kind: 'newCategory' }
 
 function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { data: AppData; cycle: Cycle; nowMs: number; onOpenBudget: () => void; onOpenSettings: () => void }) {
   const toast = useToast()
@@ -127,7 +129,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
   const cards = data.activeCategories.filter((c) => c.id !== SLEEP_CATEGORY_ID)
   const sleep = data.sleepCategory
 
-  const minutesOf = (id: string) => msToMinutes(summary.totalsMs[id] ?? 0)
+  const msOf = (id: string) => summary.totalsMs[id] ?? 0
 
   const onTap = async (category: Category) => {
     const running = runningEntryOf(data.entries, category.id)
@@ -154,7 +156,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
           <ActionCard
             key={c.id}
             category={c}
-            measuredMin={minutesOf(c.id)}
+            measuredMs={msOf(c.id)}
             budgetMin={cycle.budgets[c.id] ?? 0}
             running={!!runningEntryOf(data.entries, c.id)}
             onTap={() => onTap(c)}
@@ -165,13 +167,16 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
         {sleep && (
           <ActionCard
             category={sleep}
-            measuredMin={minutesOf(sleep.id)}
+            measuredMs={msOf(sleep.id)}
             budgetMin={cycle.budgets[sleep.id] ?? 0}
             running={false}
             onTap={onBed}
             onMenu={() => setMenu({ kind: 'card', category: sleep })}
           />
         )}
+        <button type="button" className="add-row" onClick={() => setMenu({ kind: 'newCategory' })}>
+          ＋ タイマーを追加
+        </button>
       </div>
       <p className="muted small center">カードをタップで開始／停止、長押しで同時計測。睡眠カードをタップで就寝。</p>
 
@@ -185,7 +190,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
               予算変更
             </button>
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'category', category: menu.category })}>
-              カテゴリー設定
+              タイマーの設定
             </button>
           </div>
         </Sheet>
@@ -223,6 +228,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
         />
       )}
       {menu?.kind === 'category' && <CategoryEditor category={menu.category} onClose={() => setMenu(null)} />}
+      {menu?.kind === 'newCategory' && <CategoryEditor category={newCategoryDraft(cards.length)} isNew onClose={() => setMenu(null)} />}
       {menu?.kind === 'cycle' && (
         <Sheet title={`${labels[cycle.id]} のサイクル`} onClose={() => setMenu(null)}>
           <p className="muted small">
@@ -359,4 +365,18 @@ export function EntryList({
       </div>
     </Sheet>
   )
+}
+
+/** 新しいタイマー（カテゴリー）の下書き。色は順番に割り当てる */
+export function newCategoryDraft(count: number): Category {
+  return {
+    id: newId(),
+    name: '',
+    color: CATEGORY_COLORS[count % CATEGORY_COLORS.length],
+    order: count,
+    mode: 'stopwatch',
+    protect: false,
+    archived: false,
+    updatedAt: '',
+  }
 }

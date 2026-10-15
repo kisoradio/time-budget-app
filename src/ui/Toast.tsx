@@ -19,7 +19,7 @@ export function useToast() {
   return useContext(ToastContext)
 }
 
-export function ToastProvider({ children, durationMs = 6000 }: { children: ReactNode; durationMs?: number }) {
+export function ToastProvider({ children, durationMs = 3000 }: { children: ReactNode; durationMs?: number }) {
   const [toast, setToast] = useState<ToastState | null>(null)
   const timer = useRef<number | undefined>(undefined)
 
