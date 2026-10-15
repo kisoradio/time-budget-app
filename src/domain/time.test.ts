@@ -7,7 +7,8 @@ describe('時刻の表記', () => {
     expect(formatMinutes(80)).toBe('1:20')
     expect(formatMinutes(1500)).toBe('25:00')
     expect(formatMinutes(-30)).toBe('-0:30')
-    expect(formatMs(90 * 60_000 + 59_000)).toBe('1:30')
+    expect(formatMs(90 * 60_000 + 29_000)).toBe('1:30')
+    expect(formatMs(3 * 60 * 60_000 - 500)).toBe('3:00')
   })
 
   it('datetime-local の値と UTC を往復できる', () => {

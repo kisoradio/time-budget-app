@@ -15,9 +15,9 @@ export function nowIso(): IsoUtc {
   return new Date().toISOString()
 }
 
-/** ミリ秒を分（切り捨て）に */
+/** ミリ秒を分に（四捨五入。秒の端数で 2:59 と見えるのを避ける） */
 export function msToMinutes(ms: number): number {
-  return Math.floor(ms / MINUTE)
+  return Math.round(ms / MINUTE)
 }
 
 /** 分を「H:MM」表記に。負の値は "-H:MM"。 */
@@ -29,7 +29,7 @@ export function formatMinutes(minutes: number): string {
   return `${sign}${h}:${m.toString().padStart(2, '0')}`
 }
 
-/** ミリ秒を「H:MM」表記に（分単位に切り捨て） */
+/** ミリ秒を「H:MM」表記に（分単位に四捨五入） */
 export function formatMs(ms: number): string {
   return formatMinutes(msToMinutes(ms))
 }
