@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { AppData } from '../hooks/useAppData'
 import { Donut } from '../components/Donut'
+import { CategoryEditor } from '../components/CategoryEditor'
+import { newCategoryDraft } from './TodayScreen'
 import { MinutesField } from '../ui/DateTimeField'
 import { useToast } from '../ui/Toast'
 import { updateCycleBudgets, updateTemplateBudgets } from '../data/actions'
@@ -17,6 +19,7 @@ export function BudgetScreen({ data }: { data: AppData }) {
   const [target, setTarget] = useState<Target>(cycle ? 'cycle' : 'template')
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState<{ target: Target; key: string; budgets: BudgetMap } | null>(null)
+  const [adding, setAdding] = useState(false)
 
   const effectiveTarget: Target = cycle ? target : 'template'
   const sourceKey = effectiveTarget === 'cycle' ? `cycle:${cycle?.id}:${cycle?.updatedAt}` : `template:${data.template?.updatedAt}`
@@ -75,7 +78,13 @@ export function BudgetScreen({ data }: { data: AppData }) {
             <MinutesField value={budgets[c.id] ?? 0} onChange={(min) => setMinutes(c.id, min)} />
           </li>
         ))}
+        <li>
+          <button type="button" className="add-row" onClick={() => setAdding(true)}>
+            ＋ タイマーを追加
+          </button>
+        </li>
       </ul>
+      {adding && <CategoryEditor category={newCategoryDraft(data.activeCategories.length - 1)} isNew onClose={() => setAdding(false)} />}
       <div className="sheet-actions sticky-actions">
         <span className="spacer" />
         {dirty && (

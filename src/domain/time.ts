@@ -34,6 +34,15 @@ export function formatMs(ms: number): string {
   return formatMinutes(msToMinutes(ms))
 }
 
+/** ミリ秒を「H:MM:SS」表記に（秒は切り捨て）。計測中の「動いている感」のために使う */
+export function formatMsWithSeconds(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const sec = totalSec % 60
+  return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
+}
+
 /** 端末タイムゾーンでの時刻 "HH:MM" */
 export function formatClock(iso: IsoUtc): string {
   const d = new Date(iso)

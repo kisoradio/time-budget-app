@@ -49,10 +49,10 @@ export function SettingsScreen({ data, persisted, onBack }: { data: AppData; per
 
       <h3 className="section-title">止め忘れの検知</h3>
       <p className="muted small">アプリを開いたとき、これより長く動いている計測があれば知らせます。</p>
-      <MinutesField label="通常のカテゴリー" value={data.settings.forgotThresholdMinutes} onChange={(m) => saveSettings({ forgotThresholdMinutes: Math.max(30, m) })} />
-      <MinutesField label="睡眠" value={data.settings.sleepForgotThresholdMinutes} onChange={(m) => saveSettings({ sleepForgotThresholdMinutes: Math.max(60, m) })} />
+      <MinutesField label="通常のタイマー" value={data.settings.forgotThresholdMinutes} max={24 * 60} step={30} onChange={(m) => saveSettings({ forgotThresholdMinutes: Math.max(30, m) })} />
+      <MinutesField label="睡眠" value={data.settings.sleepForgotThresholdMinutes} max={24 * 60} step={30} onChange={(m) => saveSettings({ sleepForgotThresholdMinutes: Math.max(60, m) })} />
 
-      <h3 className="section-title">カテゴリー</h3>
+      <h3 className="section-title">タイマー（カテゴリー）</h3>
       <ul className="category-list">
         {ordered.map((c, i) => (
           <li key={c.id} className="category-row">
@@ -84,8 +84,8 @@ export function SettingsScreen({ data, persisted, onBack }: { data: AppData; per
           </li>
         )}
       </ul>
-      <button type="button" className="btn btn-block" onClick={addNew}>
-        カテゴリーを追加
+      <button type="button" className="add-row" onClick={addNew}>
+        ＋ タイマーを追加
       </button>
       {archived.length > 0 && (
         <div className="archived">
