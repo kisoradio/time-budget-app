@@ -1,0 +1,185 @@
+import 'fake-indexeddb/auto'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { TimeBudgetDB, ensureSeeded } from './db'
+import { endAsNap, goToBed, startCycle, startMeasuring, stopMeasuring, updateWakeAt } from './actions'
+import { exportBackup, importBackupOverwrite, parseBackup, clearAllData } from './backup'
+import { SLEEP_CATEGORY_ID } from '../domain/types'
+import { deriveCycleRanges, splitEntries, summarizeCycle } from '../domain/cycles'
+import { HOUR, toIso, toMs } from '../domain/time'
+
+const T = (jst: string) => toMs(`${jst}+09:00`)
+const iso = (jst: string) => toIso(T(jst))
+
+let db: TimeBudgetDB
+let n = 0
+
+beforeEach(async () => {
+  db = new TimeBudgetDB(`test-${++n}`)
+  await ensureSeeded(db)
+})
+
+async function cat(name: string) {
+  const c = await db.categories.filter((c) => c.name === name).first()
+  if (!c) throw new Error(`category ${name} not found`)
+  return c
+}
+
+describe('初期データ', () => {
+  it('睡眠カテゴリーとテンプレートが用意される', async () => {
+    const sleep = await db.categories.get(SLEEP_CATEGORY_ID)
+    expect(sleep?.mode).toBe('sleep')
+    const template = await db.templates.get('default')
+    expect(template?.budgets[SLEEP_CATEGORY_ID]).toBe(420)
+  })
+})
+
+describe('計測の開始・停止（§6.2）', () => {
+  it('別のカードをタップすると前の計測が止まる', async () => {
+    const work = await cat('仕事')
+    const study = await cat('勉強')
+    await startMeasuring(work, { at: iso('2026-10-15 08:00') }, db)
+    await startMeasuring(study, { at: iso('2026-10-15 09:00') }, db)
+    const entries = await db.entries.toArray()
+    const w = entries.find((e) => e.categoryId === work.id)!
+    const s = entries.find((e) => e.categoryId === study.id)!
+    expect(w.endAt).toBe(iso('2026-10-15 09:00'))
+    expect(s.endAt).toBeNull()
+  })
+
+  it('長押し（concurrent）なら前の計測を止めない', async () => {
+    const work = await cat('仕事')
+    const study = await cat('勉強')
+    await startMeasuring(work, { at: iso('2026-10-15 08:00') }, db)
+    await startMeasuring(study, { at: iso('2026-10-15 09:00'), concurrent: true }, db)
+    const running = (await db.entries.toArray()).filter((e) => e.endAt === null)
+    expect(running).toHaveLength(2)
+  })
+
+  it('同じカテゴリーは二重に計測しない（§6.3）', async () => {
+    const work = await cat('仕事')
+    await startMeasuring(work, { at: iso('2026-10-15 08:00') }, db)
+    await startMeasuring(work, { at: iso('2026-10-15 09:00'), concurrent: true }, db)
+    expect(await db.entries.count()).toBe(1)
+  })
+
+  it('取り消すと開始が消え、止めた計測が復活する（§6.7）', async () => {
+    const work = await cat('仕事')
+    const study = await cat('勉強')
+    await startMeasuring(work, { at: iso('2026-10-15 08:00') }, db)
+    const r = await startMeasuring(study, { at: iso('2026-10-15 09:00') }, db)
+    await r.undo()
+    const entries = await db.entries.toArray()
+    expect(entries).toHaveLength(1)
+    expect(entries[0].categoryId).toBe(work.id)
+    expect(entries[0].endAt).toBeNull()
+  })
+
+  it('停止を取り消すと計測中に戻る', async () => {
+    const work = await cat('仕事')
+    await startMeasuring(work, { at: iso('2026-10-15 08:00') }, db)
+    const e = (await db.entries.toArray())[0]
+    const r = await stopMeasuring(e, work.name, iso('2026-10-15 09:00'), db)
+    expect((await db.entries.get(e.id))!.endAt).not.toBeNull()
+    await r.undo()
+    expect((await db.entries.get(e.id))!.endAt).toBeNull()
+  })
+})
+
+describe('就寝・起床・仮眠（§5）', () => {
+  it('就寝 → 起床で、睡眠が前のサイクルに計上され、新しいサイクルが始まる（§17-4）', async () => {
+    const sleep = await db.categories.get(SLEEP_CATEGORY_ID)!
+    const work = await cat('仕事')
+    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await startMeasuring(work, { at: iso('2026-10-15 09:00') }, db)
+    await goToBed(sleep!, iso('2026-10-15 23:00'), db)
+    // 就寝で仕事は止まる（§6.4）
+    const workEntry = (await db.entries.toArray()).find((e) => e.categoryId === work.id)!
+    expect(workEntry.endAt).toBe(iso('2026-10-15 23:00'))
+
+    await startCycle({ wakeAt: iso('2026-10-16 06:30') }, db)
+    const cycles = await db.cycles.toArray()
+    expect(cycles).toHaveLength(2)
+    const ranges = deriveCycleRanges(cycles)
+    const segs = splitEntries(await db.entries.toArray(), ranges, T('2026-10-16 07:00'))
+    const d1 = summarizeCycle(ranges[0], segs, T('2026-10-16 07:00'))
+    expect(d1.totalsMs[SLEEP_CATEGORY_ID]).toBe(7.5 * HOUR)
+    const d2 = summarizeCycle(ranges[1], segs, T('2026-10-16 07:00'))
+    expect(d2.totalsMs[SLEEP_CATEGORY_ID]).toBeUndefined()
+    // 予算はテンプレートからコピーされる（§4.2）
+    expect(cycles[1].budgets[SLEEP_CATEGORY_ID]).toBe(420)
+  })
+
+  it('就寝 → 仮眠だった、でサイクルが切り替わらない（§17-5）', async () => {
+    const sleep = (await db.categories.get(SLEEP_CATEGORY_ID))!
+    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await goToBed(sleep, iso('2026-10-15 14:00'), db)
+    const sleepEntry = (await db.entries.toArray()).find((e) => e.endAt === null)!
+    await endAsNap(sleepEntry, iso('2026-10-15 14:30'), db)
+    expect(await db.cycles.count()).toBe(1)
+    const e = await db.entries.get(sleepEntry.id)
+    expect(e!.endAt).toBe(iso('2026-10-15 14:30'))
+  })
+
+  it('就寝を押さずに寝た翌朝、就寝時刻を入力すると睡眠が記録され、動いていた計測はその時刻で止まる（§17-6）', async () => {
+    const work = await cat('仕事')
+    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await startMeasuring(work, { at: iso('2026-10-15 20:00') }, db)
+    await startCycle({ wakeAt: iso('2026-10-16 06:30'), bedAt: iso('2026-10-15 23:30') }, db)
+    const entries = await db.entries.toArray()
+    const workEntry = entries.find((e) => e.categoryId === work.id)!
+    expect(workEntry.endAt).toBe(iso('2026-10-15 23:30'))
+    const sleepEntry = entries.find((e) => e.categoryId === SLEEP_CATEGORY_ID)!
+    expect(sleepEntry.startAt).toBe(iso('2026-10-15 23:30'))
+    expect(sleepEntry.endAt).toBe(iso('2026-10-16 06:30'))
+    expect(sleepEntry.kind).toBe('sleep')
+  })
+
+  it('起床時刻を修正すると、起床で終わった睡眠の終了時刻も合わせて動く（§17-2, 13）', async () => {
+    const sleep = (await db.categories.get(SLEEP_CATEGORY_ID))!
+    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await goToBed(sleep, iso('2026-10-15 23:00'), db)
+    const r = await startCycle({ wakeAt: iso('2026-10-16 07:00') }, db)
+    await updateWakeAt(r.cycle, iso('2026-10-16 06:30'), db)
+    expect((await db.cycles.get(r.cycle.id))!.wakeAt).toBe(iso('2026-10-16 06:30'))
+    const sleepEntry = (await db.entries.toArray()).find((e) => e.categoryId === SLEEP_CATEGORY_ID)!
+    expect(sleepEntry.endAt).toBe(iso('2026-10-16 06:30'))
+  })
+
+  it('起床を取り消すと、サイクルが消えて睡眠の計測が再開する', async () => {
+    const sleep = (await db.categories.get(SLEEP_CATEGORY_ID))!
+    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await goToBed(sleep, iso('2026-10-15 23:00'), db)
+    const r = await startCycle({ wakeAt: iso('2026-10-16 07:00') }, db)
+    await r.undo()
+    expect(await db.cycles.count()).toBe(1)
+    const sleepEntry = (await db.entries.toArray()).find((e) => e.categoryId === SLEEP_CATEGORY_ID)!
+    expect(sleepEntry.endAt).toBeNull()
+  })
+})
+
+describe('バックアップ（§14.3, §17-15）', () => {
+  it('エクスポートし、消去後にインポートして同じ状態に戻る', async () => {
+    const work = await cat('仕事')
+    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await startMeasuring(work, { at: iso('2026-10-15 09:00') }, db)
+    const backup = await exportBackup(db)
+    const text = JSON.stringify(backup)
+
+    await clearAllData(db)
+    expect(await db.cycles.count()).toBe(0)
+    expect(await db.entries.count()).toBe(0)
+
+    await importBackupOverwrite(parseBackup(text), db)
+    const after = await exportBackup(db)
+    expect(after.categories).toEqual(backup.categories)
+    expect(after.cycles).toEqual(backup.cycles)
+    expect(after.entries).toEqual(backup.entries)
+    expect(after.templates).toEqual(backup.templates)
+  })
+
+  it('別のアプリのファイルや壊れたJSONは拒否する', () => {
+    expect(() => parseBackup('{')).toThrow()
+    expect(() => parseBackup('{"app":"other"}')).toThrow()
+    expect(() => parseBackup('{"app":"time-budget-app","schemaVersion":99}')).toThrow()
+  })
+})
