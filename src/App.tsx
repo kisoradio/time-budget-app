@@ -58,8 +58,7 @@ function Shell() {
       checkAt,
     ).filter((h) => !snoozed.current.has(h.entry.id))
     return hits[0] ?? null
-    // checkAt が変わったときだけ再評価する（表示中にずっと出続けないように）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 閾値の判定は checkAt（開いた・前面に戻った時刻）で行い、表示中に突然出ないようにする
   }, [ready, data.loaded, data.entries, data.categories, data.settings, checkAt])
 
   const { needRefresh, updateServiceWorker } = useRegisterSW({
