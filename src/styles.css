@@ -76,10 +76,19 @@ ul { list-style: none; margin: 0; padding: 0; }
 @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } 100% { content: ''; } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @keyframes toast-out { to { opacity: 0; transform: translateY(12px); } }
-@media (prefers-reduced-motion: reduce) { .card-state.on, .pulse-dot, .dots::after { animation: none; } .dots::after { content: '…'; } }
+@media (prefers-reduced-motion: reduce) { .card-state.on, .pulse-dot, .dots::after, .timeline-running, .seg-running { animation: none; } .dots::after { content: '…'; } }
 .card-hint { position: absolute; right: 12px; top: 10px; font-size: 12px; background: var(--ink); color: white; padding: 2px 8px; border-radius: 10px; }
 .card-menu { width: 52px; border: 0; border-left: 1px solid var(--line); background: transparent; font-size: 22px; color: var(--muted); }
 .card-menu:active { background: var(--bar-empty); }
+
+/* 左スワイプで削除 */
+.swipe-row { position: relative; border-radius: 14px; overflow: hidden; }
+.swipe-delete { position: absolute; top: 0; right: 0; bottom: 0; width: 96px; border: 0; background: var(--danger); color: white; font-weight: 700; font-size: 16px; border-radius: 0 14px 14px 0; }
+.swipe-content { position: relative; transition: transform 0.2s ease-out; touch-action: pan-y; }
+.swipe-row.dragging .swipe-content { transition: none; }
+.timeline-running { color: var(--accent); font-weight: 600; animation: breathe 2.4s ease-in-out infinite; }
+.seg-running { animation: seg-breathe 2.4s ease-in-out infinite; }
+@keyframes seg-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
 /* 追加の行 */
 .add-row { width: 100%; min-height: 56px; border: 2px dashed var(--line); background: transparent; border-radius: 14px; color: var(--accent); font-weight: 600; font-size: 16px; }
@@ -130,7 +139,11 @@ ul { list-style: none; margin: 0; padding: 0; }
 .field-inline input[type='checkbox'] { width: 22px; height: 22px; }
 .minutes-field { gap: 2px; }
 .minutes-head { display: flex; justify-content: space-between; align-items: baseline; }
-.minutes-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-left: auto; }
+.minutes-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-left: auto; background: none; border: 0; padding: 4px 8px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; }
+.minutes-value:active { background: var(--bar-empty); }
+.minutes-value-hint { font-size: 13px; color: var(--muted); font-weight: 400; }
+.minutes-edit { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.minutes-edit input { width: 56px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; text-align: right; min-height: 40px; font-size: 16px; }
 .minutes-slider { display: flex; align-items: center; gap: 6px; }
 .step-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 20px; font-weight: 600; flex: none; }
 .step-btn:active { background: var(--bar-empty); }

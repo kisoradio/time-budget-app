@@ -32,6 +32,7 @@ export function TimelineBar({
   const hasSecondLane = lanes.some((l) => l.lane === 1)
   const nowX = range.endMs === null ? x(nowMs) : null
   const over24 = elapsed > 24 * HOUR
+  const anyRunning = segments.some((s) => s.running)
 
   return (
     <div className="timeline" onClick={onTap} role={onTap ? 'button' : undefined} aria-label="24時間タイムライン">
@@ -45,7 +46,7 @@ export function TimelineBar({
           if (x2 - x1 < 0.5) return null
           const y = hasSecondLane ? s.lane * laneH : 0
           const h = hasSecondLane ? laneH : H
-          return <rect key={`${s.entryId}-${i}`} x={x1} y={y} width={x2 - x1} height={h} fill={colorOf(s.categoryId)} opacity={s.running ? 0.85 : 1} />
+          return <rect key={`${s.entryId}-${i}`} className={s.running ? 'seg-running' : undefined} x={x1} y={y} width={x2 - x1} height={h} fill={colorOf(s.categoryId)} />
         })}
         {/* 6時間ごとの目盛り */}
         {[6, 12, 18].map((hr) => {
@@ -56,6 +57,11 @@ export function TimelineBar({
       </svg>
       <div className="timeline-caption">
         <span>起床から {formatMs(elapsed)}{over24 ? '（24時間超）' : ''}</span>
+        {anyRunning && (
+          <span className="timeline-running">
+            <span className="pulse-dot" aria-hidden="true">●</span> 計測中<span className="dots" aria-hidden="true" />
+          </span>
+        )}
         <span>計測 {formatMs(measuredUnionMs(segments))}</span>
       </div>
     </div>

@@ -7,9 +7,10 @@ import { CategoryEditor, CATEGORY_COLORS } from '../components/CategoryEditor'
 import { newId } from '../data/db'
 import { BedtimeDialog } from '../components/BedtimeDialog'
 import { Sheet } from '../ui/Modal'
+import { SwipeRow } from '../ui/SwipeRow'
 import { DateTimeField, MinutesField } from '../ui/DateTimeField'
 import { useToast } from '../ui/Toast'
-import { endAsNap, goToBed, newManualEntry, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
+import { archiveCategory, endAsNap, goToBed, newManualEntry, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
 import { cycleLabels, deriveCycleRanges, runningEntryOf, splitEntries, summarizeCycle } from '../domain/cycles'
 import { formatClock, formatDateTime, formatMs, nowIso, toMs } from '../domain/time'
 import type { Category, Cycle, TimeEntry } from '../domain/types'
@@ -121,6 +122,7 @@ type Menu =
 function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { data: AppData; cycle: Cycle; nowMs: number; onOpenBudget: () => void; onOpenSettings: () => void }) {
   const toast = useToast()
   const [menu, setMenu] = useState<Menu | null>(null)
+  const [swipeOpenId, setSwipeOpenId] = useState<string | null>(null)
   const ranges = useMemo(() => deriveCycleRanges(data.cycles), [data.cycles])
   const range = ranges[ranges.length - 1]
   const segments = useMemo(() => splitEntries(data.entries, ranges, nowMs), [data.entries, ranges, nowMs])
@@ -146,6 +148,11 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
     const r = await goToBed(sleep)
     toast.show(r)
   }
+  const onArchive = async (category: Category) => {
+    setSwipeOpenId(null)
+    const r = await archiveCategory(category)
+    toast.show(r)
+  }
 
   return (
     <div className="screen">
@@ -153,16 +160,17 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
       <TimelineBar range={range} segments={summary.segments} categories={data.categories} nowMs={nowMs} onTap={onOpenBudget} />
       <div className="cards">
         {cards.map((c) => (
-          <ActionCard
-            key={c.id}
-            category={c}
-            measuredMs={msOf(c.id)}
-            budgetMin={cycle.budgets[c.id] ?? 0}
-            running={!!runningEntryOf(data.entries, c.id)}
-            onTap={() => onTap(c)}
-            onLongPress={() => onLongPress(c)}
-            onMenu={() => setMenu({ kind: 'card', category: c })}
-          />
+          <SwipeRow key={c.id} open={swipeOpenId === c.id} onOpenChange={(o) => setSwipeOpenId(o ? c.id : swipeOpenId === c.id ? null : swipeOpenId)} onDelete={() => onArchive(c)}>
+            <ActionCard
+              category={c}
+              measuredMs={msOf(c.id)}
+              budgetMin={cycle.budgets[c.id] ?? 0}
+              running={!!runningEntryOf(data.entries, c.id)}
+              onTap={() => onTap(c)}
+              onLongPress={() => onLongPress(c)}
+              onMenu={() => setMenu({ kind: 'card', category: c })}
+            />
+          </SwipeRow>
         ))}
         {sleep && (
           <ActionCard
@@ -178,7 +186,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
           ＋ タイマーを追加
         </button>
       </div>
-      <p className="muted small center">カードをタップで開始／停止、長押しで同時計測。睡眠カードをタップで就寝。</p>
+      <p className="muted small center">カードをタップで開始／停止、長押しで同時計測。左にスライドで削除。睡眠カードをタップで就寝。</p>
 
       {menu?.kind === 'card' && (
         <Sheet title={menu.category.name} onClose={() => setMenu(null)}>

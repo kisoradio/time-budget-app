@@ -49,7 +49,7 @@ export function SettingsScreen({ data, persisted, onBack }: { data: AppData; per
 
       <h3 className="section-title">止め忘れの検知</h3>
       <p className="muted small">アプリを開いたとき、これより長く動いている計測があれば知らせます。</p>
-      <MinutesField label="通常のタイマー" value={data.settings.forgotThresholdMinutes} max={24 * 60} step={30} onChange={(m) => saveSettings({ forgotThresholdMinutes: Math.max(30, m) })} />
+      <MinutesField label="通常のタイマー" value={data.settings.forgotThresholdMinutes} max={12 * 60} step={30} onChange={(m) => saveSettings({ forgotThresholdMinutes: Math.max(30, m) })} />
       <MinutesField label="睡眠" value={data.settings.sleepForgotThresholdMinutes} max={24 * 60} step={30} onChange={(m) => saveSettings({ sleepForgotThresholdMinutes: Math.max(60, m) })} />
 
       <h3 className="section-title">タイマー（カテゴリー）</h3>
