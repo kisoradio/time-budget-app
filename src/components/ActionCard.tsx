@@ -2,6 +2,7 @@ import { ProgressBar } from './ProgressBar'
 import { usePressable } from '../ui/usePressable'
 import { formatMinutes, formatMsWithSeconds, msToMinutes } from '../domain/time'
 import type { Category } from '../domain/types'
+import { effectiveBudgetMin } from '../domain/carryover'
 
 /**
  * アクションカード（§7.3）。
@@ -12,6 +13,7 @@ export function ActionCard({
   category,
   measuredMs,
   budgetMin,
+  carryMin = 0,
   running,
   onTap,
   onLongPress,
@@ -21,6 +23,8 @@ export function ActionCard({
   /** このサイクルのカテゴリー別合計（ミリ秒） */
   measuredMs: number
   budgetMin: number
+  /** 前日からの繰り越し（分、符号付き）。予算とは別に「2:00 +0:40」と併記する（§9） */
+  carryMin?: number
   running: boolean
   onTap: () => void
   onLongPress?: () => void
@@ -28,7 +32,8 @@ export function ActionCard({
 }) {
   const { pressing, longPressing, handlers } = usePressable({ onTap, onLongPress })
   const measuredMin = msToMinutes(measuredMs)
-  const status = describe(category, measuredMin, budgetMin)
+  const effectiveMin = effectiveBudgetMin(budgetMin, carryMin)
+  const status = describe(category, measuredMin, effectiveMin)
   const className = ['card', running ? 'card-running' : '', pressing ? 'card-pressing' : '', longPressing ? 'card-longpress' : ''].filter(Boolean).join(' ')
 
   return (
@@ -43,7 +48,11 @@ export function ActionCard({
           <span className="card-numbers">
             {/* 秒まで出して、計測中は動いていることが見えるようにする（停止中も表記をそろえる） */}
             <span className={`card-measured ${running ? 'ticking' : ''}`}>{formatMsWithSeconds(measuredMs)}</span>
-            <span className="card-budget"> / {budgetMin > 0 ? formatMinutes(budgetMin) : '—'}</span>
+            <span className="card-budget">
+              {' / '}
+              {budgetMin > 0 || carryMin !== 0 ? formatMinutes(budgetMin) : '—'}
+              {carryMin !== 0 && <span className={`card-carry ${carryMin > 0 ? 'plus' : 'minus'}`}> {carryMin > 0 ? '+' : '−'}{formatMinutes(Math.abs(carryMin))}</span>}
+            </span>
           </span>
         </div>
         <div className="card-row card-row-sub">
@@ -58,7 +67,7 @@ export function ActionCard({
             )}
           </span>
         </div>
-        <ProgressBar mode={category.mode} measuredMin={measuredMin} budgetMin={budgetMin} color={category.color} />
+        <ProgressBar mode={category.mode} measuredMin={measuredMin} budgetMin={effectiveMin} color={category.color} />
         {longPressing && <div className="card-hint">同時計測で開始</div>}
       </div>
       <button type="button" className="card-menu" onClick={onMenu} aria-label={`${category.name}のメニュー`}>

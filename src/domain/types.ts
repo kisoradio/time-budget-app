@@ -32,6 +32,12 @@ export interface Cycle {
   wakeAt: IsoUtc
   budgets: BudgetMap
   manualCut: boolean
+  /** 前サイクルから持ち越した分（分）。正は上乗せ、負は差し引き（タイマー型の超過）。予算とは別に持つ（§9） */
+  carryover?: BudgetMap
+  /** 「おやすみ」で決めた、次のサイクルへ持ち越す分 */
+  nextCarryover?: BudgetMap
+  /** 「おやすみ」を押した時刻。押していなければ null */
+  closedAt?: IsoUtc | null
   updatedAt: IsoUtc
 }
 

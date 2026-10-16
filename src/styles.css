@@ -58,10 +58,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 .card-tap { flex: 1; padding: 14px 10px 14px 16px; min-height: 84px; touch-action: pan-y; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; cursor: pointer; position: relative; display: flex; flex-direction: column; gap: 6px; }
 .card-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .card-row-sub { font-size: 13px; }
-.card-name { font-weight: 600; font-size: 17px; display: inline-flex; align-items: center; gap: 8px; }
+.card-name { font-weight: 600; font-size: 17px; display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--cat); margin-right: 6px; vertical-align: middle; }
 .card-protect { color: var(--warn); font-size: 13px; }
-.card-numbers { font-variant-numeric: tabular-nums; font-size: 17px; }
+.card-numbers { font-variant-numeric: tabular-nums; font-size: 17px; white-space: nowrap; flex: none; }
 .card-measured { font-weight: 700; }
 .card-budget { color: var(--muted); }
 .card-status { color: var(--muted); min-height: 1.2em; }
@@ -115,6 +115,24 @@ ul { list-style: none; margin: 0; padding: 0; }
 .btn-small { min-height: 36px; padding: 6px 12px; }
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .spacer { flex: 1; }
+
+/* おやすみ */
+.btn-night { width: 100%; background: #2b2d42; color: white; border-color: #2b2d42; margin-top: 8px; }
+.btn-night:active { background: #1d1f30; }
+.closed-band { background: #2b2d42; color: white; border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.closed-band .muted { color: rgba(255,255,255,0.7); }
+.closed-band .link { color: rgba(255,255,255,0.85); align-self: center; }
+.closed-text { display: flex; justify-content: space-between; align-items: baseline; }
+.closed-title { font-size: 18px; font-weight: 700; }
+.card-carry.plus { color: var(--positive); font-weight: 600; }
+.card-carry.minus { color: var(--neutral); font-weight: 600; }
+.carry-list { display: flex; flex-direction: column; gap: 10px; }
+.carry-row { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.carry-head { display: flex; justify-content: space-between; align-items: baseline; }
+.carry-name { font-weight: 600; }
+.carry-body { display: flex; flex-direction: column; gap: 6px; }
+.segmented.small button { min-height: 40px; font-size: 14px; }
+.neutral { color: var(--neutral); }
 
 /* 開始前・睡眠中 */
 .start-day { display: flex; flex-direction: column; gap: 20px; padding: 40px 0; text-align: center; }

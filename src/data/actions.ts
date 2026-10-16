@@ -41,7 +41,7 @@ async function restoreEntries(database: TimeBudgetDB, originals: TimeEntry[]) {
  * 計測の開始（§6.2）。
  * concurrent=false: 動いている他の計測は自動停止。
  * concurrent=true（長押し）: 他を止めずに同時計測。
- * 睡眠カテゴリーは必ず他をすべて止める（§6.4）。
+ * 睡眠も他のタイマーと同じ扱い（本人の要望で §6.4 を変更）。1日を締めるのは closeDay（おやすみ）。
  */
 export async function startMeasuring(
   category: Category,
@@ -50,7 +50,7 @@ export async function startMeasuring(
 ): Promise<ActionResult> {
   const at = opts.at ?? nowIso()
   const isSleep = category.mode === 'sleep' || category.id === SLEEP_CATEGORY_ID
-  const concurrent = !isSleep && !!opts.concurrent
+  const concurrent = !!opts.concurrent
 
   return database.transaction('rw', database.entries, database.settings, async () => {
     const all = await database.entries.toArray()
@@ -72,7 +72,7 @@ export async function startMeasuring(
     await database.entries.put(entry)
     await touchLastAction(database, at)
     return {
-      message: isSleep ? '就寝しました' : `${category.name}を開始しました`,
+      message: `${category.name}を開始しました`,
       undo: async () => {
         await database.transaction('rw', database.entries, async () => {
           await database.entries.delete(entry.id)
@@ -98,15 +98,69 @@ export async function stopMeasuring(entry: TimeEntry, categoryName: string, at: 
   }
 }
 
-/** 就寝（§6.4）：動いている計測をすべて止め、睡眠の計測を始める */
-export async function goToBed(sleepCategory: Category, at: string = nowIso(), database: TimeBudgetDB = db): Promise<ActionResult> {
-  return startMeasuring(sleepCategory, { at }, database)
+/**
+ * おやすみ（1日を締める）。本人の要望で、睡眠の開始と1日の終わりを分けた設計。
+ * - 今日のまとめで決めた繰り越しをサイクルに記録する（次の起床で新しいサイクルへ引き継ぐ）
+ * - 動いている計測をすべて止め、睡眠の計測を始める（睡眠がすでに動いていればそのまま）
+ */
+export async function closeDay(cycle: Cycle, nextCarryover: BudgetMap, at: string = nowIso(), database: TimeBudgetDB = db): Promise<ActionResult> {
+  return database.transaction('rw', database.entries, database.cycles, database.settings, async () => {
+    const fresh = (await database.cycles.get(cycle.id)) ?? cycle
+    const originalCycle = { ...fresh }
+    const all = await database.entries.toArray()
+    const sleepRunning = runningEntryOf(all, SLEEP_CATEGORY_ID)
+    const toStop = runningEntries(all).filter((e) => e.categoryId !== SLEEP_CATEGORY_ID)
+    const stoppedOriginals = await stopEntries(database, toStop, at)
+    let createdSleep: TimeEntry | null = null
+    if (!sleepRunning) {
+      createdSleep = { id: newId(), categoryId: SLEEP_CATEGORY_ID, startAt: at, endAt: null, kind: 'sleep', updatedAt: at }
+      await database.entries.put(createdSleep)
+    }
+    await database.cycles.put({ ...fresh, closedAt: at, nextCarryover: { ...nextCarryover }, updatedAt: nowIso() })
+    await touchLastAction(database, at)
+    return {
+      message: 'おやすみなさい',
+      undo: async () => {
+        await database.transaction('rw', database.entries, database.cycles, async () => {
+          if (createdSleep) await database.entries.delete(createdSleep.id)
+          await restoreEntries(database, stoppedOriginals)
+          const cur = (await database.cycles.get(cycle.id)) ?? originalCycle
+          await database.cycles.put({ ...cur, closedAt: originalCycle.closedAt ?? null, nextCarryover: originalCycle.nextCarryover, updatedAt: nowIso() })
+        })
+      },
+    }
+  })
 }
 
-/** 仮眠だった（§5.4）：睡眠の計測を止めるだけで、サイクルは切り替えない */
-export async function endAsNap(sleepEntry: TimeEntry, at: string = nowIso(), database: TimeBudgetDB = db): Promise<ActionResult> {
-  const r = await stopMeasuring(sleepEntry, '睡眠', at, database)
-  return { ...r, message: '仮眠として記録しました' }
+/** おやすみを取り消して1日を続ける（睡眠の計測はそのまま） */
+export async function reopenDay(cycle: Cycle, database: TimeBudgetDB = db): Promise<ActionResult> {
+  const fresh = (await database.cycles.get(cycle.id)) ?? cycle
+  const original = { ...fresh }
+  await database.cycles.put({ ...fresh, closedAt: null, updatedAt: nowIso() })
+  return {
+    message: '1日を続けます',
+    undo: async () => {
+      const cur = (await database.cycles.get(cycle.id)) ?? original
+      await database.cycles.put({ ...cur, closedAt: original.closedAt ?? null, updatedAt: nowIso() })
+    },
+  }
+}
+
+/** 繰り越しをリセットする（カテゴリー指定なしなら全部）（§9） */
+export async function resetCarryover(cycle: Cycle, categoryId?: string, database: TimeBudgetDB = db): Promise<ActionResult> {
+  const fresh = (await database.cycles.get(cycle.id)) ?? cycle
+  const original = { ...(fresh.carryover ?? {}) }
+  const next = { ...original }
+  if (categoryId) delete next[categoryId]
+  else for (const k of Object.keys(next)) delete next[k]
+  await database.cycles.put({ ...fresh, carryover: next, updatedAt: nowIso() })
+  return {
+    message: '繰り越しをリセットしました',
+    undo: async () => {
+      const cur = (await database.cycles.get(cycle.id)) ?? fresh
+      await database.cycles.put({ ...cur, carryover: original, updatedAt: nowIso() })
+    },
+  }
 }
 
 /**
@@ -117,12 +171,15 @@ export async function endAsNap(sleepEntry: TimeEntry, at: string = nowIso(), dat
  * - 予算はテンプレートからコピーする（§4.2）。
  */
 export async function startCycle(
-  opts: { wakeAt?: string; bedAt?: string | null; manualCut?: boolean } = {},
+  opts: { wakeAt?: string; bedAt?: string | null; manualCut?: boolean; carryover?: BudgetMap } = {},
   database: TimeBudgetDB = db,
 ): Promise<ActionResult & { cycle: Cycle }> {
   const wakeAt = opts.wakeAt ?? nowIso()
   return database.transaction('rw', database.entries, database.cycles, database.templates, database.settings, async () => {
     const all = await database.entries.toArray()
+    // 繰り越し：指定があればそれ、なければ前のサイクルの「おやすみ」で決めた分
+    const prev = (await database.cycles.toArray()).sort((a, b) => toMs(b.wakeAt) - toMs(a.wakeAt))[0]
+    const carryover = { ...(opts.carryover ?? prev?.nextCarryover ?? {}) }
     const sleepRunning = runningEntryOf(all, SLEEP_CATEGORY_ID)
     const stoppedOriginals: TimeEntry[] = []
     let createdSleep: TimeEntry | null = null
@@ -150,11 +207,16 @@ export async function startCycle(
     }
 
     const template = await database.templates.get(TEMPLATE_ID)
+    // 手動の区切りは同じ日の続きなので、繰り越しを引き継ぐ
+    if (opts.manualCut && !opts.carryover && prev?.carryover) Object.assign(carryover, prev.carryover)
     const cycle: Cycle = {
       id: newId(),
       wakeAt,
       budgets: { ...(template?.budgets ?? {}) },
       manualCut: !!opts.manualCut,
+      carryover,
+      nextCarryover: {},
+      closedAt: null,
       updatedAt: wakeAt,
     }
     await database.cycles.put(cycle)
