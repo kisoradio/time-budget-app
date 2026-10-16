@@ -204,6 +204,9 @@ ul { list-style: none; margin: 0; padding: 0; }
 .toast-undo { background: transparent; border: 1px solid rgba(255,255,255,0.5); color: white; border-radius: 8px; padding: 8px 12px; min-height: 40px; font-weight: 600; }
 .update-banner { position: sticky; top: 0; z-index: 45; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: var(--accent); color: white; padding: 8px 16px; padding-top: calc(8px + var(--safe-top)); }
 
+.saved-note { opacity: 0; transition: opacity 0.3s; min-height: 1.2em; }
+.saved-note.show { opacity: 1; }
+
 /* 文字 */
 .muted { color: var(--muted); }
 .small { font-size: 13px; }

@@ -257,11 +257,12 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
             起床 {formatDateTime(cycle.wakeAt)}・経過 {formatMs(summary.elapsedMs)}・未計測 {formatMs(summary.unmeasuredMs)}
           </p>
           <div className="stack">
-            <button type="button" className="btn btn-block btn-primary" onClick={() => setMenu({ kind: 'bedtime' })}>
-              今日を開始（就寝を押し忘れたとき）
-            </button>
-            <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'wake' })}>
+            <button type="button" className="btn btn-block btn-primary" onClick={() => setMenu({ kind: 'wake' })}>
               起床時刻を修正
+            </button>
+            <p className="muted small">次の2つは「新しい1日」を始める操作です。予算はテンプレートからコピーし直されます。</p>
+            <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'bedtime' })}>
+              新しい1日を始める（就寝を押し忘れたとき）
             </button>
             <button
               type="button"

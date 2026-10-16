@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppData } from '../hooks/useAppData'
 import { Donut } from '../components/Donut'
 import { CategoryEditor } from '../components/CategoryEditor'
 import { newCategoryDraft } from './TodayScreen'
 import { MinutesField } from '../ui/DateTimeField'
-import { useToast } from '../ui/Toast'
 import { updateCycleBudgets, updateTemplateBudgets } from '../data/actions'
 import { budgetSummary, currentCycle } from '../domain/cycles'
 import { formatMinutes } from '../domain/time'
@@ -14,7 +13,6 @@ type Target = 'cycle' | 'template'
 
 /** 配分タブ（§8.3、§4.2、§4.3） */
 export function BudgetScreen({ data }: { data: AppData }) {
-  const toast = useToast()
   const cycle = useMemo(() => currentCycle(data.cycles), [data.cycles])
   const [target, setTarget] = useState<Target>(cycle ? 'cycle' : 'template')
   const [selected, setSelected] = useState<string | null>(null)
@@ -22,26 +20,27 @@ export function BudgetScreen({ data }: { data: AppData }) {
   const [adding, setAdding] = useState(false)
 
   const effectiveTarget: Target = cycle ? target : 'template'
-  const sourceKey = effectiveTarget === 'cycle' ? `cycle:${cycle?.id}:${cycle?.updatedAt}` : `template:${data.template?.updatedAt}`
+  const sourceKey = effectiveTarget === 'cycle' ? `cycle:${cycle?.id}` : 'template'
   const source: BudgetMap = effectiveTarget === 'cycle' ? cycle?.budgets ?? {} : data.template?.budgets ?? {}
   const budgets = draft && draft.target === effectiveTarget && draft.key === sourceKey ? draft.budgets : source
-  const dirty = draft !== null && draft.target === effectiveTarget && draft.key === sourceKey
   const summary = budgetSummary(budgets, data.categories)
+  const [saved, setSaved] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
 
+  // 動かしたら自動で保存する（保存ボタンは置かない）。連続操作は少し待ってまとめて書く。
   const setMinutes = (id: string, min: number) => {
-    setDraft({ target: effectiveTarget, key: sourceKey, budgets: { ...budgets, [id]: min } })
+    const next = { ...budgets, [id]: min }
+    setDraft({ target: effectiveTarget, key: sourceKey, budgets: next })
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(async () => {
+      if (effectiveTarget === 'cycle' && cycle) await updateCycleBudgets(cycle, next)
+      else await updateTemplateBudgets(next)
+      setDraft(null)
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 1500)
+    }, 500)
   }
-
-  const save = async () => {
-    if (effectiveTarget === 'cycle' && cycle) {
-      await updateCycleBudgets(cycle, budgets)
-      toast.info('このサイクルの予算を保存しました')
-    } else {
-      await updateTemplateBudgets(budgets)
-      toast.info('テンプレートを保存しました（次のサイクルから）')
-    }
-    setDraft(null)
-  }
+  useEffect(() => () => window.clearTimeout(timer.current), [])
 
   return (
     <div className="screen">
@@ -85,17 +84,7 @@ export function BudgetScreen({ data }: { data: AppData }) {
         </li>
       </ul>
       {adding && <CategoryEditor category={newCategoryDraft(data.activeCategories.length - 1)} isNew onClose={() => setAdding(false)} />}
-      <div className="sheet-actions sticky-actions">
-        <span className="spacer" />
-        {dirty && (
-          <button type="button" className="btn" onClick={() => setDraft(null)}>
-            元に戻す
-          </button>
-        )}
-        <button type="button" className="btn btn-primary" onClick={save} disabled={!dirty}>
-          保存
-        </button>
-      </div>
+      <p className={`muted small center saved-note ${saved ? 'show' : ''}`}>保存しました</p>
     </div>
   )
 }
