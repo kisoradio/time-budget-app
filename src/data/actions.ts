@@ -175,11 +175,13 @@ export async function startCycle(
 
 /** 起床時刻の修正（§5.1）。所属の付け替えは表示時の計算で自動的に行われる（§14.2）。 */
 export async function updateWakeAt(cycle: Cycle, wakeAt: string, database: TimeBudgetDB = db): Promise<ActionResult> {
-  const original = { ...cycle }
+  const originalWakeAt = cycle.wakeAt
   await database.transaction('rw', database.cycles, database.entries, async () => {
-    await database.cycles.put({ ...cycle, wakeAt, updatedAt: nowIso() })
+    // 画面が持っている古いコピーで予算などを上書きしないよう、保存されている最新を読んでから起床時刻だけ変える
+    const fresh = (await database.cycles.get(cycle.id)) ?? cycle
+    await database.cycles.put({ ...fresh, wakeAt, updatedAt: nowIso() })
     // 起床で終わった睡眠記録があれば、終了時刻も合わせて動かす
-    const sleep = await database.entries.where('categoryId').equals(SLEEP_CATEGORY_ID).and((e) => e.endAt === cycle.wakeAt).first()
+    const sleep = await database.entries.where('categoryId').equals(SLEEP_CATEGORY_ID).and((e) => e.endAt === fresh.wakeAt).first()
     if (sleep && toMs(wakeAt) > toMs(sleep.startAt)) {
       await database.entries.put({ ...sleep, endAt: wakeAt, updatedAt: nowIso() })
     }
@@ -187,14 +189,16 @@ export async function updateWakeAt(cycle: Cycle, wakeAt: string, database: TimeB
   return {
     message: '起床時刻を修正しました',
     undo: async () => {
-      await database.cycles.put({ ...original, updatedAt: nowIso() })
+      const fresh = (await database.cycles.get(cycle.id)) ?? cycle
+      await database.cycles.put({ ...fresh, wakeAt: originalWakeAt, updatedAt: nowIso() })
     },
   }
 }
 
-/** そのサイクルの予算を更新（過去のサイクルには影響しない） */
+/** そのサイクルの予算を更新（過去のサイクルには影響しない）。起床時刻など他の項目は触らない。 */
 export async function updateCycleBudgets(cycle: Cycle, budgets: BudgetMap, database: TimeBudgetDB = db): Promise<void> {
-  await database.cycles.put({ ...cycle, budgets: { ...budgets }, updatedAt: nowIso() })
+  const fresh = (await database.cycles.get(cycle.id)) ?? cycle
+  await database.cycles.put({ ...fresh, budgets: { ...budgets }, updatedAt: nowIso() })
 }
 
 export async function updateTemplateBudgets(budgets: BudgetMap, database: TimeBudgetDB = db): Promise<void> {

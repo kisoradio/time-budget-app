@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TimeBudgetDB, ensureSeeded } from './db'
-import { adjustCategoryTotal, endAsNap, goToBed, startCycle, startMeasuring, stopMeasuring, updateWakeAt } from './actions'
+import { adjustCategoryTotal, endAsNap, goToBed, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from './actions'
 import { exportBackup, importBackupOverwrite, parseBackup, clearAllData } from './backup'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 import { deriveCycleRanges, splitEntries, summarizeCycle } from '../domain/cycles'
@@ -233,5 +233,22 @@ describe('合計時間の調整', () => {
     expect(await db.entries.count()).toBe(0)
     await r2.undo()
     expect(await db.entries.count()).toBe(1)
+  })
+})
+
+describe('起床時刻の修正と予算', () => {
+  it('古いコピーで起床時刻を直しても、そのサイクルの予算は巻き戻らない', async () => {
+    const work = await cat('仕事')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const stale = r.cycle // 画面が持ち続けている古いコピー
+    await updateCycleBudgets(stale, { ...stale.budgets, [work.id]: 600 }, db)
+    const r2 = await updateWakeAt(stale, iso('2026-10-15 06:30'), db)
+    let c = (await db.cycles.get(stale.id))!
+    expect(c.wakeAt).toBe(iso('2026-10-15 06:30'))
+    expect(c.budgets[work.id]).toBe(600)
+    await r2.undo()
+    c = (await db.cycles.get(stale.id))!
+    expect(c.wakeAt).toBe(iso('2026-10-15 07:00'))
+    expect(c.budgets[work.id]).toBe(600)
   })
 })
