@@ -13,6 +13,7 @@ export function ForgotDialog({
   category,
   elapsedMs,
   nowMs,
+  dayClosed,
   onDone,
   onKeep,
 }: {
@@ -20,6 +21,8 @@ export function ForgotDialog({
   category: Category | undefined
   elapsedMs: number
   nowMs: number
+  /** 「おやすみ」で1日を締めたあとか。睡眠の止め忘れを「起床」として扱うかの判断に使う */
+  dayClosed: boolean
   onDone: () => void
   onKeep: () => void
 }) {
@@ -27,7 +30,8 @@ export function ForgotDialog({
   const [picking, setPicking] = useState(false)
   const [at, setAt] = useState<string>(new Date(nowMs).toISOString())
   const name = category?.name ?? '計測'
-  const isSleep = entry.kind === 'sleep' || entry.categoryId === SLEEP_CATEGORY_ID
+  // おやすみ後に睡眠が動き続けているなら、起床を押し忘れたと考えて「起床」として扱う
+  const isSleep = (entry.kind === 'sleep' || entry.categoryId === SLEEP_CATEGORY_ID) && dayClosed
 
   const stopAt = async (iso: string) => {
     if (toMs(iso) < toMs(entry.startAt)) return

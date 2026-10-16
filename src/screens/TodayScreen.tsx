@@ -10,19 +10,20 @@ import { Sheet } from '../ui/Modal'
 import { SwipeRow } from '../ui/SwipeRow'
 import { DateTimeField, MinutesField } from '../ui/DateTimeField'
 import { useToast } from '../ui/Toast'
-import { adjustCategoryTotal, archiveCategory, endAsNap, goToBed, newManualEntry, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
+import { adjustCategoryTotal, archiveCategory, closeDay, newManualEntry, reopenDay, resetCarryover, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
+import { CloseDaySheet } from '../components/CloseDaySheet'
+import { hasCarryover, proposeCarryover } from '../domain/carryover'
+import type { BudgetMap } from '../domain/types'
 import { cycleLabels, deriveCycleRanges, runningEntryOf, splitEntries, summarizeCycle } from '../domain/cycles'
-import { formatClock, formatDateTime, formatMinutes, formatMs, nowIso, toMs } from '../domain/time'
+import { formatClock, formatDateTime, formatMinutes, formatMs, msToMinutes, nowIso, toMs } from '../domain/time'
 import type { Category, Cycle, TimeEntry } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 
 export function TodayScreen({ data, nowMs, onOpenBudget, onOpenSettings }: { data: AppData; nowMs: number; onOpenBudget: () => void; onOpenSettings: () => void }) {
   const ranges = useMemo(() => deriveCycleRanges(data.cycles), [data.cycles])
   const current = ranges.length ? ranges[ranges.length - 1] : null
-  const sleepRunning = runningEntryOf(data.entries, SLEEP_CATEGORY_ID)
 
   if (!current) return <StartDayScreen data={data} nowMs={nowMs} onOpenSettings={onOpenSettings} />
-  if (sleepRunning) return <SleepScreen data={data} entry={sleepRunning} nowMs={nowMs} onOpenSettings={onOpenSettings} />
   return <CycleScreen data={data} cycle={current.cycle} nowMs={nowMs} onOpenBudget={onOpenBudget} onOpenSettings={onOpenSettings} />
 }
 
@@ -71,42 +72,6 @@ function StartDayScreen({ data, nowMs, onOpenSettings }: { data: AppData; nowMs:
   )
 }
 
-/** 睡眠中の画面（§7.4） */
-function SleepScreen({ data, entry, nowMs, onOpenSettings }: { data: AppData; entry: TimeEntry; nowMs: number; onOpenSettings: () => void }) {
-  const toast = useToast()
-  const [editing, setEditing] = useState(false)
-  const elapsed = Math.max(0, nowMs - toMs(entry.startAt))
-  const wake = async () => {
-    const r = await startCycle({ wakeAt: nowIso() })
-    toast.show(r)
-  }
-  const nap = async () => {
-    const r = await endAsNap(entry)
-    toast.show(r)
-  }
-  return (
-    <div className="screen">
-      <Header title="睡眠中" onOpenSettings={onOpenSettings} />
-      <div className="sleep-screen">
-        <p className="sleep-since">
-          {formatDateTime(entry.startAt)} に就寝
-          <button type="button" className="link" onClick={() => setEditing(true)}>
-            修正
-          </button>
-        </p>
-        <p className="sleep-elapsed">{formatMs(elapsed)}</p>
-        <button type="button" className="btn btn-primary btn-big" onClick={wake}>
-          起床（今日を開始）
-        </button>
-        <button type="button" className="btn btn-quiet" onClick={nap}>
-          仮眠だった
-        </button>
-      </div>
-      {editing && <EntryEditor entry={entry} categories={data.categories} nowMs={nowMs} onClose={() => setEditing(false)} />}
-    </div>
-  )
-}
-
 type Menu =
   | { kind: 'card'; category: Category }
   | { kind: 'entries'; category: Category }
@@ -116,6 +81,8 @@ type Menu =
   | { kind: 'cycle' }
   | { kind: 'wake' }
   | { kind: 'bedtime' }
+  | { kind: 'bedtimeCarry'; bedAt: string | null }
+  | { kind: 'closeDay' }
   | { kind: 'addEntry'; category: Category }
   | { kind: 'editEntry'; entry: TimeEntry }
   | { kind: 'newCategory' }
@@ -144,11 +111,24 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
     const r = await startMeasuring(category, { concurrent: true })
     toast.show(r)
   }
-  const onBed = async () => {
-    if (!sleep) return
-    const r = await goToBed(sleep)
+  const carryRows = () =>
+    proposeCarryover(
+      data.activeCategories,
+      cycle.budgets,
+      cycle.carryover,
+      Object.fromEntries(Object.entries(summary.totalsMs).map(([k, v]) => [k, msToMinutes(v)])),
+    )
+  const onCloseDay = async (next: BudgetMap) => {
+    const r = await closeDay(cycle, next)
+    toast.show(r)
+    setMenu(null)
+  }
+  const onWake = async () => {
+    const r = await startCycle({ wakeAt: nowIso() })
     toast.show(r)
   }
+  const closed = !!cycle.closedAt
+  const sleepRunning = runningEntryOf(data.entries, SLEEP_CATEGORY_ID)
   const onArchive = async (category: Category) => {
     setSwipeOpenId(null)
     const r = await archiveCategory(category)
@@ -158,6 +138,29 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
   return (
     <div className="screen">
       <Header title={labels[cycle.id] ?? ''} subtitle={`起床 ${formatClock(cycle.wakeAt)}`} onTitleTap={() => setMenu({ kind: 'cycle' })} onOpenSettings={onOpenSettings} />
+      {closed && (
+        <div className="closed-band">
+          <div className="closed-text">
+            <span className="closed-title">おやすみ中</span>
+            <span className="muted small">
+              {formatClock(cycle.closedAt!)} から{sleepRunning ? `・睡眠 ${formatMs(nowMs - toMs(sleepRunning.startAt))}` : ''}
+            </span>
+          </div>
+          <button type="button" className="btn btn-primary btn-big" onClick={onWake}>
+            起床（今日を開始）
+          </button>
+          <button
+            type="button"
+            className="link"
+            onClick={async () => {
+              const r = await reopenDay(cycle)
+              toast.show(r)
+            }}
+          >
+            おやすみを取り消して1日を続ける
+          </button>
+        </div>
+      )}
       <TimelineBar range={range} segments={summary.segments} categories={data.categories} nowMs={nowMs} onTap={onOpenBudget} />
       <div className="cards">
         {cards.map((c) => (
@@ -166,6 +169,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
               category={c}
               measuredMs={msOf(c.id)}
               budgetMin={cycle.budgets[c.id] ?? 0}
+              carryMin={cycle.carryover?.[c.id] ?? 0}
               running={!!runningEntryOf(data.entries, c.id)}
               onTap={() => onTap(c)}
               onLongPress={() => onLongPress(c)}
@@ -178,16 +182,22 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
             category={sleep}
             measuredMs={msOf(sleep.id)}
             budgetMin={cycle.budgets[sleep.id] ?? 0}
-            running={false}
-            onTap={onBed}
+            running={!!sleepRunning}
+            onTap={() => onTap(sleep)}
+            onLongPress={() => onLongPress(sleep)}
             onMenu={() => setMenu({ kind: 'card', category: sleep })}
           />
         )}
         <button type="button" className="add-row" onClick={() => setMenu({ kind: 'newCategory' })}>
           ＋ タイマーを追加
         </button>
+        {!closed && (
+          <button type="button" className="btn btn-big btn-night" onClick={() => setMenu({ kind: 'closeDay' })}>
+            おやすみ
+          </button>
+        )}
       </div>
-      <p className="muted small center">カードをタップで開始／停止、長押しで同時計測。左にスライドで削除。睡眠カードをタップで就寝。</p>
+      <p className="muted small center">カードをタップで開始／停止、長押しで同時計測。左にスライドで削除。寝るときは「おやすみ」で1日を締めます。</p>
 
       {menu?.kind === 'card' && (
         <Sheet title={menu.category.name} onClose={() => setMenu(null)}>
@@ -201,9 +211,23 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'category', category: menu.category })}>
               タイマーの設定
             </button>
+            {(cycle.carryover?.[menu.category.id] ?? 0) !== 0 && (
+              <button
+                type="button"
+                className="btn btn-block btn-quiet"
+                onClick={async () => {
+                  const r = await resetCarryover(cycle, menu.category.id)
+                  toast.show(r)
+                  setMenu(null)
+                }}
+              >
+                繰り越し（{(cycle.carryover?.[menu.category.id] ?? 0) > 0 ? '+' : '−'}{formatMinutes(Math.abs(cycle.carryover?.[menu.category.id] ?? 0))}）をリセット
+              </button>
+            )}
           </div>
         </Sheet>
       )}
+      {menu?.kind === 'closeDay' && <CloseDaySheet rows={carryRows()} onSubmit={onCloseDay} onClose={() => setMenu(null)} />}
       {menu?.kind === 'adjust' && (
         <AdjustTotalSheet
           category={menu.category}
@@ -260,6 +284,19 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
             <button type="button" className="btn btn-block btn-primary" onClick={() => setMenu({ kind: 'wake' })}>
               起床時刻を修正
             </button>
+            {hasCarryover(cycle.carryover) && (
+              <button
+                type="button"
+                className="btn btn-block"
+                onClick={async () => {
+                  const r = await resetCarryover(cycle)
+                  toast.show(r)
+                  setMenu(null)
+                }}
+              >
+                繰り越しをすべてリセット
+              </button>
+            )}
             <p className="muted small">次の2つは「新しい1日」を始める操作です。予算はテンプレートからコピーし直されます。</p>
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'bedtime' })}>
               新しい1日を始める（就寝を押し忘れたとき）
@@ -282,8 +319,17 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
         <BedtimeDialog
           defaultBedAt={data.settings.lastActionAt ?? new Date(nowMs).toISOString()}
           wakeAt={new Date(nowMs).toISOString()}
-          onSubmit={async (bedAt) => {
-            const r = await startCycle({ wakeAt: nowIso(), bedAt })
+          onSubmit={(bedAt) => setMenu({ kind: 'bedtimeCarry', bedAt })}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {menu?.kind === 'bedtimeCarry' && (
+        <CloseDaySheet
+          rows={carryRows()}
+          title="昨日のまとめ"
+          primaryLabel="新しい1日を始める"
+          onSubmit={async (carry) => {
+            const r = await startCycle({ wakeAt: nowIso(), bedAt: menu.bedAt, carryover: carry })
             toast.show(r)
             setMenu(null)
           }}

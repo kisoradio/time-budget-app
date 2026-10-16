@@ -9,7 +9,7 @@ import { RecordsScreen } from './screens/RecordsScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { ForgotDialog } from './components/ForgotDialog'
 import { ensureSeeded, requestPersistentStorage } from './data/db'
-import { detectForgotten } from './domain/cycles'
+import { currentCycle, detectForgotten } from './domain/cycles'
 
 type Tab = 'today' | 'budget' | 'records'
 
@@ -112,6 +112,7 @@ function Shell() {
           category={forgotten.category}
           elapsedMs={forgotten.elapsedMs}
           nowMs={nowMs}
+          dayClosed={!!currentCycle(data.cycles)?.closedAt}
           onDone={recheck}
           onKeep={() => {
             snoozed.current.add(forgotten.entry.id)

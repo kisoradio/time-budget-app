@@ -10,6 +10,7 @@ import { cycleLabels, deriveCycleRanges, splitEntries, summarizeCycle, type Cycl
 import { formatClock, formatDateTime, formatMinutes, formatMs, msToMinutes, nowIso, toMs } from '../domain/time'
 import type { TimeEntry } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
+import { effectiveBudgetMin } from '../domain/carryover'
 
 const BACKUP_REMIND_DAYS = 7
 
@@ -51,7 +52,7 @@ export function RecordsScreen({ data, nowMs }: { data: AppData; nowMs: number })
               <button type="button" className="cycle-row" onClick={() => setOpenId(r.cycle.id)}>
                 <span className="cycle-label">
                   {labels[r.cycle.id]}
-                  {r.endMs === null && <span className="tag">進行中</span>}
+                  {r.endMs === null && <span className="tag">{r.cycle.closedAt ? 'おやすみ中' : '進行中'}</span>}
                   {r.cycle.manualCut && <span className="tag muted">手動で区切り</span>}
                 </span>
                 <span className="muted small">
@@ -124,7 +125,8 @@ function CycleDetail({
         </thead>
         <tbody>
           {rows.map((c) => {
-            const budget = range.cycle.budgets[c.id] ?? 0
+            const carry = range.cycle.carryover?.[c.id] ?? 0
+            const budget = effectiveBudgetMin(range.cycle.budgets[c.id] ?? 0, carry)
             const actual = msToMinutes(summary.totalsMs[c.id] ?? 0)
             const diff = actual - budget
             return (
@@ -133,7 +135,10 @@ function CycleDetail({
                   <span className="card-dot" style={{ background: c.color }} />
                   {c.name}
                 </td>
-                <td>{budget > 0 ? formatMinutes(budget) : '—'}</td>
+                <td>
+                  {budget > 0 ? formatMinutes(budget) : '—'}
+                  {carry !== 0 && <span className="muted small">（繰越 {carry > 0 ? '+' : '−'}{formatMinutes(Math.abs(carry))}）</span>}
+                </td>
                 <td>{formatMinutes(actual)}</td>
                 <td className={diff > 0 && c.mode === 'stopwatch' ? 'positive' : 'muted'}>{budget > 0 || actual > 0 ? (diff >= 0 ? `+${formatMinutes(diff)}` : formatMinutes(diff)) : ''}</td>
               </tr>

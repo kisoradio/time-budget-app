@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TimeBudgetDB, ensureSeeded } from './db'
-import { adjustCategoryTotal, endAsNap, goToBed, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from './actions'
+import { adjustCategoryTotal, closeDay, reopenDay, resetCarryover, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from './actions'
 import { exportBackup, importBackupOverwrite, parseBackup, clearAllData } from './backup'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 import { deriveCycleRanges, splitEntries, summarizeCycle } from '../domain/cycles'
@@ -86,13 +86,12 @@ describe('計測の開始・停止（§6.2）', () => {
 })
 
 describe('就寝・起床・仮眠（§5）', () => {
-  it('就寝 → 起床で、睡眠が前のサイクルに計上され、新しいサイクルが始まる（§17-4）', async () => {
-    const sleep = await db.categories.get(SLEEP_CATEGORY_ID)!
+  it('おやすみ → 起床で、睡眠が前のサイクルに計上され、新しいサイクルが始まる（§17-4）', async () => {
     const work = await cat('仕事')
-    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const r0 = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
     await startMeasuring(work, { at: iso('2026-10-15 09:00') }, db)
-    await goToBed(sleep!, iso('2026-10-15 23:00'), db)
-    // 就寝で仕事は止まる（§6.4）
+    await closeDay(r0.cycle, {}, iso('2026-10-15 23:00'), db)
+    // おやすみで仕事は止まる
     const workEntry = (await db.entries.toArray()).find((e) => e.categoryId === work.id)!
     expect(workEntry.endAt).toBe(iso('2026-10-15 23:00'))
 
@@ -109,15 +108,16 @@ describe('就寝・起床・仮眠（§5）', () => {
     expect(cycles[1].budgets[SLEEP_CATEGORY_ID]).toBe(420)
   })
 
-  it('就寝 → 仮眠だった、でサイクルが切り替わらない（§17-5）', async () => {
+  it('睡眠カードのタップ（昼寝）ではサイクルが切り替わらない（§17-5 相当）', async () => {
     const sleep = (await db.categories.get(SLEEP_CATEGORY_ID))!
     await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
-    await goToBed(sleep, iso('2026-10-15 14:00'), db)
+    await startMeasuring(sleep, { at: iso('2026-10-15 14:00') }, db)
     const sleepEntry = (await db.entries.toArray()).find((e) => e.endAt === null)!
-    await endAsNap(sleepEntry, iso('2026-10-15 14:30'), db)
+    await stopMeasuring(sleepEntry, '睡眠', iso('2026-10-15 14:30'), db)
     expect(await db.cycles.count()).toBe(1)
     const e = await db.entries.get(sleepEntry.id)
     expect(e!.endAt).toBe(iso('2026-10-15 14:30'))
+    expect((await db.cycles.toArray())[0].closedAt ?? null).toBeNull()
   })
 
   it('就寝を押さずに寝た翌朝、就寝時刻を入力すると睡眠が記録され、動いていた計測はその時刻で止まる（§17-6）', async () => {
@@ -135,9 +135,8 @@ describe('就寝・起床・仮眠（§5）', () => {
   })
 
   it('起床時刻を修正すると、起床で終わった睡眠の終了時刻も合わせて動く（§17-2, 13）', async () => {
-    const sleep = (await db.categories.get(SLEEP_CATEGORY_ID))!
-    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
-    await goToBed(sleep, iso('2026-10-15 23:00'), db)
+    const r0 = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await closeDay(r0.cycle, {}, iso('2026-10-15 23:00'), db)
     const r = await startCycle({ wakeAt: iso('2026-10-16 07:00') }, db)
     await updateWakeAt(r.cycle, iso('2026-10-16 06:30'), db)
     expect((await db.cycles.get(r.cycle.id))!.wakeAt).toBe(iso('2026-10-16 06:30'))
@@ -146,9 +145,8 @@ describe('就寝・起床・仮眠（§5）', () => {
   })
 
   it('起床を取り消すと、サイクルが消えて睡眠の計測が再開する', async () => {
-    const sleep = (await db.categories.get(SLEEP_CATEGORY_ID))!
-    await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
-    await goToBed(sleep, iso('2026-10-15 23:00'), db)
+    const r0 = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await closeDay(r0.cycle, {}, iso('2026-10-15 23:00'), db)
     const r = await startCycle({ wakeAt: iso('2026-10-16 07:00') }, db)
     await r.undo()
     expect(await db.cycles.count()).toBe(1)
@@ -250,5 +248,54 @@ describe('起床時刻の修正と予算', () => {
     c = (await db.cycles.get(stale.id))!
     expect(c.wakeAt).toBe(iso('2026-10-15 07:00'))
     expect(c.budgets[work.id]).toBe(600)
+  })
+})
+
+describe('おやすみと繰り越し（§9）', () => {
+  it('おやすみで決めた繰り越しが次のサイクルに引き継がれ、リセットで消える', async () => {
+    const study = await cat('勉強')
+    const r0 = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const r = await closeDay(r0.cycle, { [study.id]: 40 }, iso('2026-10-15 23:00'), db)
+    let c0 = (await db.cycles.get(r0.cycle.id))!
+    expect(c0.closedAt).toBe(iso('2026-10-15 23:00'))
+    expect(c0.nextCarryover).toEqual({ [study.id]: 40 })
+    // 睡眠が動いている
+    expect((await db.entries.toArray()).filter((e) => e.endAt === null && e.categoryId === SLEEP_CATEGORY_ID)).toHaveLength(1)
+
+    const r1 = await startCycle({ wakeAt: iso('2026-10-16 06:30') }, db)
+    expect(r1.cycle.carryover).toEqual({ [study.id]: 40 })
+    const reset = await resetCarryover(r1.cycle, study.id, db)
+    expect((await db.cycles.get(r1.cycle.id))!.carryover).toEqual({})
+    await reset.undo()
+    expect((await db.cycles.get(r1.cycle.id))!.carryover).toEqual({ [study.id]: 40 })
+
+    // おやすみの取り消し
+    await r1.undo()
+    await r.undo()
+    c0 = (await db.cycles.get(r0.cycle.id))!
+    expect(c0.closedAt ?? null).toBeNull()
+    expect((await db.entries.toArray()).filter((e) => e.categoryId === SLEEP_CATEGORY_ID)).toHaveLength(0)
+  })
+
+  it('おやすみを取り消して1日を続けられる（睡眠の計測は残る）', async () => {
+    const r0 = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await closeDay(r0.cycle, {}, iso('2026-10-15 23:00'), db)
+    await reopenDay(r0.cycle, db)
+    expect((await db.cycles.get(r0.cycle.id))!.closedAt).toBeNull()
+    expect((await db.entries.toArray()).filter((e) => e.endAt === null)).toHaveLength(1)
+  })
+
+  it('睡眠がすでに動いていればおやすみで二重に始めない。長押しなら睡眠と他の同時計測もできる', async () => {
+    const sleep = (await db.categories.get(SLEEP_CATEGORY_ID))!
+    const work = await cat('仕事')
+    const r0 = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await startMeasuring(sleep, { at: iso('2026-10-15 22:00') }, db)
+    await startMeasuring(work, { at: iso('2026-10-15 22:10'), concurrent: true }, db)
+    expect((await db.entries.toArray()).filter((e) => e.endAt === null)).toHaveLength(2)
+    await closeDay(r0.cycle, {}, iso('2026-10-15 23:00'), db)
+    const running = (await db.entries.toArray()).filter((e) => e.endAt === null)
+    expect(running).toHaveLength(1)
+    expect(running[0].categoryId).toBe(SLEEP_CATEGORY_ID)
+    expect(running[0].startAt).toBe(iso('2026-10-15 22:00'))
   })
 })
