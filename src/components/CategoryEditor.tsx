@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Sheet } from '../ui/Modal'
-import { archiveCategory, saveCategory } from '../data/actions'
+import { archiveCategory, saveCategory, setBudgetForNewCategory } from '../data/actions'
+import { MinutesField } from '../ui/DateTimeField'
 import { useToast } from '../ui/Toast'
 import type { Category } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
@@ -11,12 +12,14 @@ export const CATEGORY_COLORS = ['#6a8caf', '#f2c14e', '#8fbc8f', '#e07a5f', '#5b
 export function CategoryEditor({ category, isNew, onClose }: { category: Category; isNew?: boolean; onClose: () => void }) {
   const toast = useToast()
   const [draft, setDraft] = useState<Category>(category)
+  const [budgetMin, setBudgetMin] = useState(60)
   const isSleep = category.id === SLEEP_CATEGORY_ID
 
   const save = async () => {
     const name = draft.name.trim()
     if (!name) return
     await saveCategory({ ...draft, name })
+    if (isNew) await setBudgetForNewCategory(draft.id, budgetMin)
     toast.info(isNew ? `${name}を追加しました` : '保存しました')
     onClose()
   }
@@ -69,6 +72,12 @@ export function CategoryEditor({ category, isNew, onClose }: { category: Categor
         <input type="checkbox" checked={draft.protect} onChange={(e) => setDraft({ ...draft, protect: e.target.checked })} />
         <span>優先して守る</span>
       </label>
+      {isNew && (
+        <div className="field">
+          <MinutesField label="予算（1日あたり）" value={budgetMin} onChange={setBudgetMin} step={10} />
+          <p className="muted small">今日の予算になり、次の日からも同じ値が使われます（配分タブで変えられます）。</p>
+        </div>
+      )}
       <div className="sheet-actions">
         {!isNew && !isSleep && (
           <button type="button" className="btn btn-danger" onClick={archive}>
