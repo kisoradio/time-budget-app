@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TimeBudgetDB, ensureSeeded } from './db'
-import { adjustCategoryTotal, closeDay, reopenDay, resetCarryover, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from './actions'
+import { adjustCategoryTotal, closeDay, reopenDay, resetCarryover, saveCategory, setBudgetForNewCategory, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from './actions'
 import { exportBackup, importBackupOverwrite, parseBackup, clearAllData } from './backup'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 import { deriveCycleRanges, splitEntries, summarizeCycle } from '../domain/cycles'
@@ -297,5 +297,17 @@ describe('おやすみと繰り越し（§9）', () => {
     expect(running).toHaveLength(1)
     expect(running[0].categoryId).toBe(SLEEP_CATEGORY_ID)
     expect(running[0].startAt).toBe(iso('2026-10-15 22:00'))
+  })
+})
+
+describe('タイマーの追加と予算', () => {
+  it('追加時の予算が今のサイクルとテンプレートの両方に入る', async () => {
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await saveCategory({ id: 'exam', name: '模試', color: '#000', order: 9, mode: 'timer', protect: false, archived: false, updatedAt: '' }, db)
+    await setBudgetForNewCategory('exam', 80, db)
+    expect((await db.cycles.get(r.cycle.id))!.budgets.exam).toBe(80)
+    expect((await db.templates.get('default'))!.budgets.exam).toBe(80)
+    // 既存の予算は変わらない
+    expect((await db.cycles.get(r.cycle.id))!.budgets[SLEEP_CATEGORY_ID]).toBe(420)
   })
 })

@@ -433,3 +433,18 @@ export async function adjustCategoryTotal(
     }
   })
 }
+
+/**
+ * 新しいタイマーの予算を、今のサイクルとテンプレートの両方に入れる。
+ * 「追加のときに一緒に時間も決めたい」という要望に合わせたもの。
+ */
+export async function setBudgetForNewCategory(categoryId: string, minutes: number, database: TimeBudgetDB = db): Promise<void> {
+  const min = Math.max(0, Math.round(minutes))
+  await database.transaction('rw', database.cycles, database.templates, async () => {
+    const cycles = await database.cycles.toArray()
+    const current = cycles.sort((a, b) => toMs(b.wakeAt) - toMs(a.wakeAt))[0]
+    if (current) await database.cycles.put({ ...current, budgets: { ...current.budgets, [categoryId]: min }, updatedAt: nowIso() })
+    const t = (await database.templates.get(TEMPLATE_ID)) ?? { id: TEMPLATE_ID, name: '基本', budgets: {}, updatedAt: '' }
+    await database.templates.put({ ...t, budgets: { ...t.budgets, [categoryId]: min }, updatedAt: nowIso() })
+  })
+}
