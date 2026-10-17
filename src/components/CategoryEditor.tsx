@@ -67,15 +67,15 @@ export function CategoryEditor({ category, isNew, onClose }: { category: Categor
           </p>
         </div>
       )}
-      {isSleep && <p className="muted small">睡眠は組み込みのタイマーです。予算に対する不足・超過だけを表示します。</p>}
+      {isSleep && <p className="muted small">睡眠は組み込みのタイマーです。枠に対する不足・超過だけを表示します。</p>}
       <label className="field field-inline">
         <input type="checkbox" checked={draft.protect} onChange={(e) => setDraft({ ...draft, protect: e.target.checked })} />
         <span>優先して守る</span>
       </label>
       {isNew && (
         <div className="field">
-          <MinutesField label="予算（1日あたり）" value={budgetMin} onChange={setBudgetMin} step={10} />
-          <p className="muted small">今日の予算になり、次の日からも同じ値が使われます（配分タブで変えられます）。</p>
+          <MinutesField label="枠（1日あたり）" value={budgetMin} onChange={setBudgetMin} step={10} />
+          <p className="muted small">今日の枠になり、次の日からも同じ値が使われます（配分タブで変えられます）。</p>
         </div>
       )}
       <div className="sheet-actions">

@@ -206,7 +206,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
               合計時間を調整
             </button>
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'budget', category: menu.category })}>
-              予算変更
+              枠を変更
             </button>
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'category', category: menu.category })}>
               タイマーの設定
@@ -267,7 +267,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
           minutes={cycle.budgets[menu.category.id] ?? 0}
           onSave={async (min) => {
             await updateCycleBudgets(cycle, { ...cycle.budgets, [menu.category.id]: min })
-            toast.info('このサイクルの予算を変えました')
+            toast.info('今日の枠を変えました')
             setMenu(null)
           }}
           onClose={() => setMenu(null)}
@@ -297,7 +297,7 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
                 繰り越しをすべてリセット
               </button>
             )}
-            <p className="muted small">次の2つは「新しい1日」を始める操作です。予算はテンプレートからコピーし直されます。</p>
+            <p className="muted small">次の2つは「新しい1日」を始める操作です。枠はテンプレートからコピーし直されます。</p>
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'bedtime' })}>
               新しい1日を始める（就寝を押し忘れたとき）
             </button>
@@ -403,9 +403,9 @@ function AdjustTotalSheet({ category, currentMs, onSave, onDetail, onClose }: { 
 function BudgetSheet({ category, minutes, onSave, onClose }: { category: Category; minutes: number; onSave: (min: number) => void; onClose: () => void }) {
   const [value, setValue] = useState(minutes)
   return (
-    <Sheet title={`${category.name}の予算（このサイクル）`} onClose={onClose}>
+    <Sheet title={`${category.name}の枠（今日）`} onClose={onClose}>
       <MinutesField value={value} onChange={setValue} />
-      <p className="muted small">次回からの予算は「配分」タブのテンプレートで変えられます。</p>
+      <p className="muted small">次回からの枠は「配分」タブのテンプレートで変えられます。</p>
       <div className="sheet-actions">
         <span className="spacer" />
         <button type="button" className="btn" onClick={onClose}>
