@@ -32,7 +32,7 @@ export function Donut({
   const over = Math.max(0, total - DAY_MINUTES)
 
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} className="donut" role="img" aria-label="予算の配分">
+    <svg viewBox={`0 0 ${size} ${size}`} className="donut" role="img" aria-label="枠の配分">
       <circle cx={c} cy={c} r={r} fill="none" stroke="var(--bar-empty)" strokeWidth={stroke} />
       {arcs.map((a) => (
         <circle

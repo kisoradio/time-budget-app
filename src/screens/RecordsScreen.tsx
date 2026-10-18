@@ -118,7 +118,7 @@ function CycleDetail({
         <thead>
           <tr>
             <th>カテゴリー</th>
-            <th>予算</th>
+            <th>枠</th>
             <th>実績</th>
             <th>差</th>
           </tr>
@@ -311,7 +311,7 @@ function BackupSection({ data }: { data: AppData }) {
       )}
       {confirmClear && (
         <Sheet title="すべての記録を消去しますか" onClose={() => setConfirmClear(false)}>
-          <p>サイクル・計測記録・カテゴリー・予算がすべて消え、初期状態に戻ります。取り消せません。</p>
+          <p>サイクル・計測記録・タイマー・枠がすべて消え、初期状態に戻ります。取り消せません。</p>
           <div className="sheet-actions">
             <span className="spacer" />
             <button type="button" className="btn" onClick={() => setConfirmClear(false)}>

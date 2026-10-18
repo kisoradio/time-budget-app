@@ -78,17 +78,17 @@ export function ActionCard({
 }
 
 function describe(category: Category, measured: number, budget: number): { text: string; tone: string } {
-  if (budget <= 0) return { text: '予算なし', tone: 'muted' }
+  if (budget <= 0) return { text: '枠なし', tone: 'muted' }
   if (category.mode === 'timer') {
     const remaining = budget - measured
     if (remaining > 0) return { text: `残り ${formatMinutes(remaining)}`, tone: 'muted' }
-    if (remaining === 0) return { text: '予算どおり', tone: 'muted' }
+    if (remaining === 0) return { text: '枠どおり', tone: 'muted' }
     return { text: `超過 ${formatMinutes(-remaining)}`, tone: 'neutral' }
   }
   if (category.mode === 'sleep') {
     const diff = measured - budget
-    if (diff === 0) return { text: '予算どおり', tone: 'muted' }
-    return diff > 0 ? { text: `予算より ${formatMinutes(diff)} 多い`, tone: 'muted' } : { text: `予算まで ${formatMinutes(-diff)}`, tone: 'muted' }
+    if (diff === 0) return { text: '枠どおり', tone: 'muted' }
+    return diff > 0 ? { text: `枠より ${formatMinutes(diff)} 多い`, tone: 'muted' } : { text: `枠まで ${formatMinutes(-diff)}`, tone: 'muted' }
   }
   const over = measured - budget
   if (over >= 0) return { text: over === 0 ? '目標到達' : `目標到達 +${formatMinutes(over)}`, tone: 'positive' }

@@ -59,7 +59,7 @@ export function BudgetScreen({ data }: { data: AppData }) {
           </button>
         </div>
       )}
-      {!cycle && <p className="muted small center">まだサイクルが始まっていません。テンプレートの予算が「今日を開始」のときにコピーされます。</p>}
+      {!cycle && <p className="muted small center">まだサイクルが始まっていません。テンプレートの枠が「今日を開始」のときにコピーされます。</p>}
       <Donut budgets={budgets} categories={data.activeCategories} selectedId={selected} onSelect={setSelected} />
       <p className="center">
         合計 {formatMinutes(summary.totalMinutes)} ／ 24:00
