@@ -4,7 +4,7 @@
  */
 import type { BudgetMap, Category, Cycle, Settings, TimeEntry } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
-import { nowIso, toIso, toMs } from '../domain/time'
+import { formatClock, nowIso, toIso, toMs } from '../domain/time'
 import { runningEntries, runningEntryOf } from '../domain/cycles'
 import { db, DEFAULT_SETTINGS, newId, TEMPLATE_ID, type TimeBudgetDB } from './db'
 
@@ -343,18 +343,23 @@ export function isoFromMs(ms: number): string {
  * そのサイクルでのカテゴリー別合計を、指定した長さに合わせる（カードの「合計時間を調整」）。
  * - 増やすとき：直近の記録の開始時刻を早める（起床時刻より前にはしない）。
  *   止まっている記録で足りなければ終了時刻を今まで遅らせる。記録がなければ今で終わる記録を作る。
+ *   それでも足りない（起床から今までの時間より多い）ときは、moveWakeEarlier が true なら
+ *   起床時刻をその分だけ早めて入れる。false なら入る分だけ入れ、shortfallMs に残りを返す。
  * - 減らすとき：直近の記録から縮める。0 になった記録は削除し、さらに前の記録を縮める。
  */
 export async function adjustCategoryTotal(
   category: Category,
-  cycleWakeAt: string,
+  cycle: Cycle,
   targetMs: number,
   nowMs: number = Date.now(),
+  opts: { moveWakeEarlier?: boolean } = {},
   database: TimeBudgetDB = db,
-): Promise<ActionResult> {
-  const wakeMs = toMs(cycleWakeAt)
+): Promise<ActionResult & { shortfallMs: number; wakeMovedTo: string | null }> {
   const target = Math.max(0, Math.round(targetMs / 60_000) * 60_000)
-  return database.transaction('rw', database.entries, database.settings, async () => {
+  return database.transaction('rw', database.entries, database.cycles, database.settings, async () => {
+    const freshCycle = (await database.cycles.get(cycle.id)) ?? cycle
+    const originalCycle = { ...freshCycle }
+    const wakeMs = toMs(freshCycle.wakeAt)
     const all = (await database.entries.where('categoryId').equals(category.id).toArray()).filter((e) => {
       const end = e.endAt === null ? nowMs : toMs(e.endAt)
       return end > wakeMs && toMs(e.startAt) < nowMs
@@ -366,9 +371,13 @@ export async function adjustCategoryTotal(
     const originals: TimeEntry[] = []
     const deleted: TimeEntry[] = []
     const created: TimeEntry[] = []
+    let sleepOriginal: TimeEntry | null = null
+    let wakeMovedTo: string | null = null
     const sorted = [...all].sort((a, b) => toMs(b.startAt) - toMs(a.startAt))
 
     if (delta > 0) {
+      // 起床時刻まで広げた記録（足りないときに、起床を早めてさらに広げる対象）
+      let anchor: TimeEntry | null = null
       const latest = sorted[0]
       if (latest) {
         originals.push({ ...latest })
@@ -384,7 +393,9 @@ export async function adjustCategoryTotal(
           endAt = toIso(endMs + later)
           delta -= later
         }
-        await database.entries.put({ ...latest, startAt: toIso(startMs), endAt, updatedAt: nowIso() })
+        const updated = { ...latest, startAt: toIso(startMs), endAt, updatedAt: nowIso() }
+        await database.entries.put(updated)
+        if (startMs <= wakeMs) anchor = updated
       }
       if (delta > 0) {
         const startMs = Math.max(wakeMs, nowMs - delta)
@@ -392,7 +403,30 @@ export async function adjustCategoryTotal(
           const e: TimeEntry = { id: newId(), categoryId: category.id, startAt: toIso(startMs), endAt: toIso(nowMs), kind: category.mode === 'sleep' ? 'sleep' : 'manual', updatedAt: nowIso() }
           await database.entries.put(e)
           created.push(e)
+          delta -= nowMs - startMs
+          if (startMs <= wakeMs) anchor = e
         }
+      }
+      if (delta > 0 && opts.moveWakeEarlier) {
+        // 起床から今までの時間より多い分は、起床時刻をその分だけ早めて入れる
+        const newWakeMs = wakeMs - delta
+        const newWakeAt = toIso(newWakeMs)
+        await database.cycles.put({ ...freshCycle, wakeAt: newWakeAt, updatedAt: nowIso() })
+        // 起床で終わった睡眠があれば、終了時刻も合わせて早める
+        const sleep = await database.entries.where('categoryId').equals(SLEEP_CATEGORY_ID).and((e) => e.endAt === freshCycle.wakeAt).first()
+        if (sleep && newWakeMs > toMs(sleep.startAt)) {
+          sleepOriginal = { ...sleep }
+          await database.entries.put({ ...sleep, endAt: newWakeAt, updatedAt: nowIso() })
+        }
+        if (anchor) {
+          await database.entries.put({ ...anchor, startAt: newWakeAt, updatedAt: nowIso() })
+        } else {
+          const e: TimeEntry = { id: newId(), categoryId: category.id, startAt: newWakeAt, endAt: freshCycle.wakeAt, kind: 'manual', updatedAt: nowIso() }
+          await database.entries.put(e)
+          created.push(e)
+        }
+        wakeMovedTo = newWakeAt
+        delta = 0
       }
     } else if (delta < 0) {
       let remain = -delta
@@ -403,7 +437,7 @@ export async function adjustCategoryTotal(
           // 丸ごと消す（起床前にはみ出した分があれば、起床時刻で切る）
           if (toMs(e.startAt) < wakeMs) {
             originals.push({ ...e })
-            await database.entries.put({ ...e, endAt: cycleWakeAt, updatedAt: nowIso() })
+            await database.entries.put({ ...e, endAt: freshCycle.wakeAt, updatedAt: nowIso() })
           } else {
             deleted.push({ ...e })
             await database.entries.delete(e.id)
@@ -419,15 +453,23 @@ export async function adjustCategoryTotal(
           remain = 0
         }
       }
+      delta = 0
     }
     await touchLastAction(database, nowIso())
     return {
-      message: `${category.name}の合計を調整しました`,
+      shortfallMs: Math.max(0, delta),
+      wakeMovedTo,
+      message: wakeMovedTo ? `${category.name}の合計を調整し、起床を ${formatClock(wakeMovedTo)} に早めました` : `${category.name}の合計を調整しました`,
       undo: async () => {
-        await database.transaction('rw', database.entries, async () => {
+        await database.transaction('rw', database.entries, database.cycles, async () => {
           for (const e of created) await database.entries.delete(e.id)
           for (const e of deleted) await database.entries.put(e)
           await restoreEntries(database, originals)
+          if (sleepOriginal) await database.entries.put(sleepOriginal)
+          if (wakeMovedTo) {
+            const cur = (await database.cycles.get(cycle.id)) ?? originalCycle
+            await database.cycles.put({ ...cur, wakeAt: originalCycle.wakeAt, updatedAt: nowIso() })
+          }
         })
       },
     }

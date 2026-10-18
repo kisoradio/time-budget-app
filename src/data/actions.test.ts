@@ -191,12 +191,12 @@ describe('合計時間の調整', () => {
     await stopMeasuring(e, work.name, iso('2026-10-15 10:00'), db)
     const now = T('2026-10-15 12:00')
     // 1:00 → 1:30
-    await adjustCategoryTotal(work, r.cycle.wakeAt, 90 * 60_000, now, db)
+    await adjustCategoryTotal(work, r.cycle, 90 * 60_000, now, {}, db)
     let w = (await db.entries.get(e.id))!
     expect(w.startAt).toBe(iso('2026-10-15 08:30'))
     expect(w.endAt).toBe(iso('2026-10-15 10:00'))
     // 1:30 → 0:20
-    const r2 = await adjustCategoryTotal(work, r.cycle.wakeAt, 20 * 60_000, now, db)
+    const r2 = await adjustCategoryTotal(work, r.cycle, 20 * 60_000, now, {}, db)
     w = (await db.entries.get(e.id))!
     expect(w.endAt).toBe(iso('2026-10-15 08:50'))
     await r2.undo()
@@ -209,11 +209,11 @@ describe('合計時間の調整', () => {
     const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
     await startMeasuring(work, { at: iso('2026-10-15 09:00') }, db)
     const now = T('2026-10-15 09:30')
-    await adjustCategoryTotal(work, r.cycle.wakeAt, 60 * 60_000, now, db)
+    await adjustCategoryTotal(work, r.cycle, 60 * 60_000, now, {}, db)
     let w = (await db.entries.toArray())[0]
     expect(w.startAt).toBe(iso('2026-10-15 08:30'))
     expect(w.endAt).toBeNull()
-    await adjustCategoryTotal(work, r.cycle.wakeAt, 10 * 60_000, now, db)
+    await adjustCategoryTotal(work, r.cycle, 10 * 60_000, now, {}, db)
     w = (await db.entries.toArray())[0]
     expect(w.startAt).toBe(iso('2026-10-15 09:20'))
   })
@@ -222,12 +222,12 @@ describe('合計時間の調整', () => {
     const work = await cat('仕事')
     const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
     const now = T('2026-10-15 12:00')
-    await adjustCategoryTotal(work, r.cycle.wakeAt, 45 * 60_000, now, db)
+    await adjustCategoryTotal(work, r.cycle, 45 * 60_000, now, {}, db)
     const entries = await db.entries.toArray()
     expect(entries).toHaveLength(1)
     expect(entries[0].startAt).toBe(iso('2026-10-15 11:15'))
     expect(entries[0].endAt).toBe(iso('2026-10-15 12:00'))
-    const r2 = await adjustCategoryTotal(work, r.cycle.wakeAt, 0, now, db)
+    const r2 = await adjustCategoryTotal(work, r.cycle, 0, now, {}, db)
     expect(await db.entries.count()).toBe(0)
     await r2.undo()
     expect(await db.entries.count()).toBe(1)
@@ -297,6 +297,46 @@ describe('おやすみと繰り越し（§9）', () => {
     expect(running).toHaveLength(1)
     expect(running[0].categoryId).toBe(SLEEP_CATEGORY_ID)
     expect(running[0].startAt).toBe(iso('2026-10-15 22:00'))
+  })
+})
+
+describe('合計時間の調整：起床から今までより多いとき', () => {
+  it('そのままでは入る分だけ入れて不足を返し、起床を早める指定なら起床時刻を動かして全部入れる', async () => {
+    const study = await cat('勉強')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const now = T('2026-10-15 07:30')
+    // 起床から 30 分しか経っていないのに 1:20 を入れる
+    const r1 = await adjustCategoryTotal(study, r.cycle, 80 * 60_000, now, {}, db)
+    expect(r1.shortfallMs).toBe(50 * 60_000)
+    expect(r1.wakeMovedTo).toBeNull()
+    let entries = (await db.entries.toArray()).filter((e) => e.categoryId === study.id)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].startAt).toBe(iso('2026-10-15 07:00'))
+    await r1.undo()
+    expect((await db.entries.toArray()).filter((e) => e.categoryId === study.id)).toHaveLength(0)
+
+    const r2 = await adjustCategoryTotal(study, r.cycle, 80 * 60_000, now, { moveWakeEarlier: true }, db)
+    expect(r2.shortfallMs).toBe(0)
+    expect(r2.wakeMovedTo).toBe(iso('2026-10-15 06:10'))
+    expect((await db.cycles.get(r.cycle.id))!.wakeAt).toBe(iso('2026-10-15 06:10'))
+    entries = (await db.entries.toArray()).filter((e) => e.categoryId === study.id)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].startAt).toBe(iso('2026-10-15 06:10'))
+    expect(entries[0].endAt).toBe(iso('2026-10-15 07:30'))
+    await r2.undo()
+    expect((await db.cycles.get(r.cycle.id))!.wakeAt).toBe(iso('2026-10-15 07:00'))
+    expect((await db.entries.toArray()).filter((e) => e.categoryId === study.id)).toHaveLength(0)
+  })
+
+  it('起床を早めると、その起床で終わっていた睡眠の終了も一緒に早まる', async () => {
+    const study = await cat('勉強')
+    const r0 = await startCycle({ wakeAt: iso('2026-10-14 07:00') }, db)
+    await closeDay(r0.cycle, {}, iso('2026-10-14 23:00'), db)
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const now = T('2026-10-15 07:10')
+    await adjustCategoryTotal(study, r.cycle, 60 * 60_000, now, { moveWakeEarlier: true }, db)
+    const sleep = (await db.entries.toArray()).find((e) => e.categoryId === SLEEP_CATEGORY_ID)!
+    expect(sleep.endAt).toBe(iso('2026-10-15 06:10'))
   })
 })
 

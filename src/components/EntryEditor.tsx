@@ -3,7 +3,7 @@ import { Sheet } from '../ui/Modal'
 import { DateTimeField } from '../ui/DateTimeField'
 import { deleteEntry, upsertEntry } from '../data/actions'
 import { useToast } from '../ui/Toast'
-import { formatMs, toMs } from '../domain/time'
+import { formatClock, formatMs, toMs } from '../domain/time'
 import type { Category, TimeEntry } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 
@@ -13,12 +13,15 @@ export function EntryEditor({
   categories,
   isNew,
   nowMs,
+  wakeAt,
   onClose,
 }: {
   entry: TimeEntry
   categories: Category[]
   isNew?: boolean
   nowMs: number
+  /** 今日の起床時刻。これより前の部分は前のサイクルに入ることを知らせる */
+  wakeAt?: string
   onClose: () => void
 }) {
   const toast = useToast()
@@ -72,6 +75,9 @@ export function EntryEditor({
       )}
       {draft.endAt !== null && <DateTimeField label="終了" value={draft.endAt} onChange={(iso) => iso && setDraft({ ...draft, endAt: iso })} />}
       <p className="muted">長さ {durationMs >= 0 ? formatMs(durationMs) : '—'}</p>
+      {wakeAt && startMs < toMs(wakeAt) && (
+        <p className="notice">開始が今日の起床（{formatClock(wakeAt)}）より前です。その部分は前のサイクルの記録になり、今日の合計には入りません。</p>
+      )}
       {error && <p className="error">{error}</p>}
       <div className="sheet-actions">
         {!isNew && (

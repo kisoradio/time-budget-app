@@ -232,8 +232,10 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
         <AdjustTotalSheet
           category={menu.category}
           currentMs={msOf(menu.category.id)}
-          onSave={async (targetMs) => {
-            const r = await adjustCategoryTotal(menu.category, cycle.wakeAt, targetMs, nowMs)
+          wakeAt={cycle.wakeAt}
+          nowMs={nowMs}
+          onSave={async (targetMs, moveWakeEarlier) => {
+            const r = await adjustCategoryTotal(menu.category, cycle, targetMs, nowMs, { moveWakeEarlier })
             toast.show(r)
             setMenu(null)
           }}
@@ -251,13 +253,14 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
           onClose={() => setMenu(null)}
         />
       )}
-      {menu?.kind === 'editEntry' && <EntryEditor entry={menu.entry} categories={data.categories} nowMs={nowMs} onClose={() => setMenu(null)} />}
+      {menu?.kind === 'editEntry' && <EntryEditor entry={menu.entry} categories={data.categories} nowMs={nowMs} wakeAt={cycle.wakeAt} onClose={() => setMenu(null)} />}
       {menu?.kind === 'addEntry' && (
         <EntryEditor
           entry={newManualEntry(menu.category.id, new Date(nowMs - 3_600_000).toISOString(), new Date(nowMs).toISOString())}
           categories={data.categories}
           isNew
           nowMs={nowMs}
+          wakeAt={cycle.wakeAt}
           onClose={() => setMenu(null)}
         />
       )}
@@ -373,9 +376,28 @@ export function WakeSheet({ cycle, nowMs, onSave, onClose }: { cycle: Cycle; now
   )
 }
 
-function AdjustTotalSheet({ category, currentMs, onSave, onDetail, onClose }: { category: Category; currentMs: number; onSave: (ms: number) => void; onDetail: () => void; onClose: () => void }) {
+function AdjustTotalSheet({
+  category,
+  currentMs,
+  wakeAt,
+  nowMs,
+  onSave,
+  onDetail,
+  onClose,
+}: {
+  category: Category
+  currentMs: number
+  wakeAt: string
+  nowMs: number
+  onSave: (ms: number, moveWakeEarlier: boolean) => void
+  onDetail: () => void
+  onClose: () => void
+}) {
   const currentMin = Math.round(currentMs / 60_000)
   const [value, setValue] = useState(currentMin)
+  // 起床から今までの時間より多くは、起床を早めないと今日に入らない
+  const capacityMin = Math.max(0, Math.floor((nowMs - toMs(wakeAt)) / 60_000))
+  const needsEarlierWake = value > capacityMin
   return (
     <Sheet title={`${category.name}の今日の合計`} onClose={onClose}>
       <p className="muted small">押し忘れなどで実際と違うときに、合計を合わせます。増やすと直近の記録が伸び、減らすと直近の記録から縮みます。</p>
@@ -384,6 +406,11 @@ function AdjustTotalSheet({ category, currentMs, onSave, onDetail, onClose }: { 
         今の合計 {formatMinutes(currentMin)}
         {value !== currentMin && ` → ${formatMinutes(value)}（${value > currentMin ? '+' : '−'}${formatMinutes(Math.abs(value - currentMin))}）`}
       </p>
+      {needsEarlierWake && (
+        <p className="notice">
+          起床（{formatClock(wakeAt)}）から今までは {formatMinutes(capacityMin)} なので、今日に入るのはそこまでです。保存すると、足りない {formatMinutes(value - capacityMin)} の分だけ起床時刻を早めて（{formatClock(new Date(toMs(wakeAt) - (value - capacityMin) * 60_000).toISOString())}）入れます。
+        </p>
+      )}
       <div className="sheet-actions">
         <button type="button" className="btn btn-quiet" onClick={onDetail}>
           記録ごとに修正
@@ -392,8 +419,8 @@ function AdjustTotalSheet({ category, currentMs, onSave, onDetail, onClose }: { 
         <button type="button" className="btn" onClick={onClose}>
           やめる
         </button>
-        <button type="button" className="btn btn-primary" onClick={() => onSave(value * 60_000)} disabled={value === currentMin}>
-          保存
+        <button type="button" className="btn btn-primary" onClick={() => onSave(value * 60_000, needsEarlierWake)} disabled={value === currentMin}>
+          {needsEarlierWake ? '起床を早めて保存' : '保存'}
         </button>
       </div>
     </Sheet>
