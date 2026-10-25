@@ -8,6 +8,7 @@ import {
   cycleLabels,
   deriveCycleRanges,
   detectForgotten,
+  freeGaps,
   measuredUnionMs,
   mergeIntervals,
   splitEntries,
@@ -243,5 +244,26 @@ describe('予算の集計（§4.2）', () => {
   it('1分単位の端数でも合計が正しい', () => {
     const s = budgetSummary({ work: 1439, sleep: 1 }, categories)
     expect(s.totalMinutes).toBe(1440)
+  })
+})
+
+describe('空き時間', () => {
+  it('計測していない区間を順に返す', () => {
+    const gaps = freeGaps(
+      [
+        { startMs: 20, endMs: 30 },
+        { startMs: 50, endMs: 60 },
+        { startMs: 55, endMs: 70 },
+        { startMs: -10, endMs: 5 },
+      ],
+      0,
+      100,
+    )
+    expect(gaps).toEqual([
+      { startMs: 5, endMs: 20 },
+      { startMs: 30, endMs: 50 },
+      { startMs: 70, endMs: 100 },
+    ])
+    expect(freeGaps([], 0, 10)).toEqual([{ startMs: 0, endMs: 10 }])
   })
 })
