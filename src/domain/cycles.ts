@@ -270,3 +270,17 @@ export function budgetSummary(budgets: Record<string, number>, categories: Categ
 export function isoAtOrNull(iso: IsoUtc | null | undefined): number | null {
   return iso ? toMs(iso) : null
 }
+
+/** [startMs, endMs) のうち、どの区間にも入っていない「空き」を返す（開始順） */
+export function freeGaps(intervals: { startMs: number; endMs: number }[], startMs: number, endMs: number): { startMs: number; endMs: number }[] {
+  if (endMs <= startMs) return []
+  const busy = mergeIntervals(intervals.map((i) => ({ startMs: Math.max(startMs, i.startMs), endMs: Math.min(endMs, i.endMs) })))
+  const gaps: { startMs: number; endMs: number }[] = []
+  let cursor = startMs
+  for (const b of busy) {
+    if (b.startMs > cursor) gaps.push({ startMs: cursor, endMs: b.startMs })
+    cursor = Math.max(cursor, b.endMs)
+  }
+  if (cursor < endMs) gaps.push({ startMs: cursor, endMs })
+  return gaps
+}

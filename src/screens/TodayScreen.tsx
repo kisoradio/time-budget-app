@@ -10,11 +10,12 @@ import { Sheet } from '../ui/Modal'
 import { SwipeRow } from '../ui/SwipeRow'
 import { DateTimeField, MinutesField } from '../ui/DateTimeField'
 import { useToast } from '../ui/Toast'
-import { adjustCategoryTotal, archiveCategory, closeDay, newManualEntry, reopenDay, resetCarryover, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
+import { adjustCategoryTotal, archiveCategory, backfillUnmeasured, closeDay, newManualEntry, reopenDay, resetCarryover, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from '../data/actions'
 import { CloseDaySheet } from '../components/CloseDaySheet'
+import { BackfillSheet } from '../components/BackfillSheet'
 import { hasCarryover, proposeCarryover } from '../domain/carryover'
 import type { BudgetMap } from '../domain/types'
-import { cycleLabels, deriveCycleRanges, runningEntryOf, splitEntries, summarizeCycle } from '../domain/cycles'
+import { cycleLabels, deriveCycleRanges, freeGaps, runningEntryOf, splitEntries, summarizeCycle } from '../domain/cycles'
 import { formatClock, formatDateTime, formatMinutes, formatMs, msToMinutes, nowIso, toMs } from '../domain/time'
 import type { Category, Cycle, TimeEntry } from '../domain/types'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
@@ -83,6 +84,7 @@ type Menu =
   | { kind: 'bedtime' }
   | { kind: 'bedtimeCarry'; bedAt: string | null }
   | { kind: 'closeDay' }
+  | { kind: 'backfill'; thenCut: boolean }
   | { kind: 'addEntry'; category: Category }
   | { kind: 'editEntry'; entry: TimeEntry }
   | { kind: 'newCategory' }
@@ -129,6 +131,13 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
   }
   const closed = !!cycle.closedAt
   const sleepRunning = runningEntryOf(data.entries, SLEEP_CATEGORY_ID)
+  // 起床から今までの空き時間（全タイマーの記録を除いた分）
+  const freeMin = Math.floor(freeGaps(summary.segments, range.startMs, nowMs).reduce((s, g) => s + (g.endMs - g.startMs), 0) / 60_000)
+  const cutHere = async () => {
+    const r = await startCycle({ wakeAt: nowIso(), manualCut: true })
+    toast.show(r)
+    setMenu(null)
+  }
   const onArchive = async (category: Category) => {
     setSwipeOpenId(null)
     const r = await archiveCategory(category)
@@ -300,23 +309,46 @@ function CycleScreen({ data, cycle, nowMs, onOpenBudget, onOpenSettings }: { dat
                 繰り越しをすべてリセット
               </button>
             )}
+            <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'backfill', thenCut: false })}>
+              未計測の時間を振り分ける（{formatMinutes(freeMin)}）
+            </button>
             <p className="muted small">次の2つは「新しい1日」を始める操作です。枠はテンプレートからコピーし直されます。</p>
             <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'bedtime' })}>
-              新しい1日を始める（就寝を押し忘れたとき）
+              新しい1日を始める（寝て起きたとき）
             </button>
-            <button
-              type="button"
-              className="btn btn-block"
-              onClick={async () => {
-                const r = await startCycle({ wakeAt: nowIso(), manualCut: true })
-                toast.show(r)
-                setMenu(null)
-              }}
-            >
-              ここで区切る（新しいサイクルを今から始める）
+            <button type="button" className="btn btn-block" onClick={() => setMenu({ kind: 'backfill', thenCut: true })}>
+              ここで区切る（寝ていないが区切りたいとき）
             </button>
           </div>
         </Sheet>
+      )}
+      {menu?.kind === 'backfill' && (
+        <BackfillSheet
+          categories={data.activeCategories}
+          freeMin={freeMin}
+          wakeAt={cycle.wakeAt}
+          title={menu.thenCut ? 'ここまでの時間を記録して区切る' : '未計測の時間を振り分ける'}
+          primaryLabel={menu.thenCut ? '記録して区切る' : '記録する'}
+          secondaryLabel={menu.thenCut ? '記録せずに区切る' : undefined}
+          onSecondary={menu.thenCut ? cutHere : undefined}
+          onSubmit={async (allocations, moveWakeEarlier) => {
+            const r = await backfillUnmeasured(cycle, allocations, nowMs, { moveWakeEarlier })
+            if (menu.thenCut) {
+              const r2 = await startCycle({ wakeAt: nowIso(), manualCut: true })
+              toast.show({
+                message: `${r.message}。ここで区切りました`,
+                undo: async () => {
+                  await r2.undo()
+                  await r.undo()
+                },
+              })
+            } else {
+              toast.show(r)
+            }
+            setMenu(null)
+          }}
+          onClose={() => setMenu(null)}
+        />
       )}
       {menu?.kind === 'bedtime' && (
         <BedtimeDialog

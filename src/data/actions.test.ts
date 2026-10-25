@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { TimeBudgetDB, ensureSeeded } from './db'
-import { adjustCategoryTotal, closeDay, reopenDay, resetCarryover, saveCategory, setBudgetForNewCategory, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from './actions'
+import { adjustCategoryTotal, backfillUnmeasured, closeDay, reopenDay, resetCarryover, saveCategory, setBudgetForNewCategory, startCycle, startMeasuring, stopMeasuring, updateCycleBudgets, updateWakeAt } from './actions'
 import { exportBackup, importBackupOverwrite, parseBackup, clearAllData } from './backup'
 import { SLEEP_CATEGORY_ID } from '../domain/types'
 import { deriveCycleRanges, splitEntries, summarizeCycle } from '../domain/cycles'
@@ -337,6 +337,75 @@ describe('合計時間の調整：起床から今までより多いとき', () =
     await adjustCategoryTotal(study, r.cycle, 60 * 60_000, now, { moveWakeEarlier: true }, db)
     const sleep = (await db.entries.toArray()).find((e) => e.categoryId === SLEEP_CATEGORY_ID)!
     expect(sleep.endAt).toBe(iso('2026-10-15 06:10'))
+  })
+})
+
+describe('あとから入れた時間は重ならない', () => {
+  it('合計時間の調整は、他のタイマーの記録と重ならない空き時間に入る', async () => {
+    const work = await cat('仕事')
+    const study = await cat('勉強')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const now = T('2026-10-15 12:00')
+    await adjustCategoryTotal(work, r.cycle, 120 * 60_000, now, {}, db) // 10:00-12:00
+    await adjustCategoryTotal(study, r.cycle, 60 * 60_000, now, {}, db) // 空きは 07:00-10:00 → 09:00-10:00
+    const entries = await db.entries.toArray()
+    const w = entries.find((e) => e.categoryId === work.id)!
+    const st = entries.find((e) => e.categoryId === study.id)!
+    expect([w.startAt, w.endAt]).toEqual([iso('2026-10-15 10:00'), iso('2026-10-15 12:00')])
+    expect([st.startAt, st.endAt]).toEqual([iso('2026-10-15 09:00'), iso('2026-10-15 10:00')])
+  })
+
+  it('空きが足りないときは起床を早め、睡眠の終了も動く', async () => {
+    const work = await cat('仕事')
+    const study = await cat('勉強')
+    const r0 = await startCycle({ wakeAt: iso('2026-10-14 07:00') }, db)
+    await closeDay(r0.cycle, {}, iso('2026-10-14 23:00'), db)
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const now = T('2026-10-15 08:00')
+    await adjustCategoryTotal(work, r.cycle, 60 * 60_000, now, {}, db) // 07:00-08:00 で空きなし
+    const r2 = await adjustCategoryTotal(study, r.cycle, 30 * 60_000, now, { moveWakeEarlier: true }, db)
+    expect(r2.wakeMovedTo).toBe(iso('2026-10-15 06:30'))
+    const st = (await db.entries.toArray()).find((e) => e.categoryId === study.id)!
+    expect([st.startAt, st.endAt]).toEqual([iso('2026-10-15 06:30'), iso('2026-10-15 07:00')])
+    const sleep = (await db.entries.toArray()).find((e) => e.categoryId === SLEEP_CATEGORY_ID)!
+    expect(sleep.endAt).toBe(iso('2026-10-15 06:30'))
+  })
+
+  it('未計測の振り分けは、起床から順に並べて記録し、取り消せる', async () => {
+    const work = await cat('仕事')
+    const study = await cat('勉強')
+    const run = await cat('運動')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    await startMeasuring(run, { at: iso('2026-10-15 11:00') }, db) // 11:00- 計測中
+    const now = T('2026-10-15 12:00')
+    const res = await backfillUnmeasured(
+      r.cycle,
+      [
+        { category: work, minutes: 120 },
+        { category: study, minutes: 90 },
+      ],
+      now,
+      {},
+      db,
+    )
+    expect(res.shortfallMs).toBe(0)
+    const entries = (await db.entries.toArray()).filter((e) => e.categoryId !== run.id)
+    const w = entries.find((e) => e.categoryId === work.id)!
+    const st = entries.find((e) => e.categoryId === study.id)!
+    expect([w.startAt, w.endAt]).toEqual([iso('2026-10-15 07:00'), iso('2026-10-15 09:00')])
+    expect([st.startAt, st.endAt]).toEqual([iso('2026-10-15 09:00'), iso('2026-10-15 10:30')])
+    await res.undo()
+    expect(await db.entries.count()).toBe(1)
+  })
+
+  it('未計測の振り分けで空きが足りなければ起床を早めて入れる', async () => {
+    const work = await cat('仕事')
+    const r = await startCycle({ wakeAt: iso('2026-10-15 07:00') }, db)
+    const now = T('2026-10-15 08:00')
+    const res = await backfillUnmeasured(r.cycle, [{ category: work, minutes: 180 }], now, { moveWakeEarlier: true }, db)
+    expect(res.wakeMovedTo).toBe(iso('2026-10-15 05:00'))
+    const w = (await db.entries.toArray()).find((e) => e.categoryId === work.id)!
+    expect([w.startAt, w.endAt]).toEqual([iso('2026-10-15 05:00'), iso('2026-10-15 08:00')])
   })
 })
 
